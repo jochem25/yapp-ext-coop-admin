@@ -9,8 +9,16 @@ interface GLEntry {
   posting_date: string;
 }
 
+interface AccountInfo {
+  name: string;
+  account_name: string;
+  account_number: string | null;
+}
+
 interface AccountAgg {
   account: string;
+  label: string;
+  number: string;
   debit: number;
   credit: number;
   net: number;
@@ -61,8 +69,26 @@ export default function LedgerChart({ company, year: defaultYear }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [entries, setEntries] = useState<GLEntry[]>([]);
+  const [accountMeta, setAccountMeta] = useState<Map<string, AccountInfo>>(new Map());
 
   useEffect(() => { setYear(defaultYear); }, [defaultYear]);
+
+  // Load account metadata once per company (account_number + Dutch name)
+  useEffect(() => {
+    const filters: unknown[][] = [["is_group", "=", 0]];
+    if (company) filters.push(["company", "=", company]);
+    yapp.fetchList<AccountInfo>("Account", {
+      fields: ["name", "account_name", "account_number"],
+      filters,
+      limit_page_length: 2000,
+    })
+      .then((list) => {
+        const m = new Map<string, AccountInfo>();
+        for (const a of list) m.set(a.name, a);
+        setAccountMeta(m);
+      })
+      .catch(() => {});
+  }, [company]);
 
   async function load() {
     setLoading(true);
@@ -98,19 +124,33 @@ export default function LedgerChart({ company, year: defaultYear }: Props) {
       cur.credit += e.credit ?? 0;
       map.set(e.account, cur);
     }
-    let arr = Array.from(map.entries()).map(([account, v]) => ({
-      account,
-      debit: v.debit,
-      credit: v.credit,
-      net: v.debit - v.credit,
-      gross: v.debit + v.credit,
-    }));
+    let arr = Array.from(map.entries()).map(([account, v]) => {
+      const meta = accountMeta.get(account);
+      const number = meta?.account_number ?? "";
+      const accName = meta?.account_name ?? account.split(" - ")[0];
+      const label = number ? `${number} ${accName}` : accName;
+      return {
+        account,
+        label,
+        number,
+        debit: v.debit,
+        credit: v.credit,
+        net: v.debit - v.credit,
+        gross: v.debit + v.credit,
+      };
+    });
     if (!showZero) {
       arr = arr.filter((a) => a.gross > 0.01);
     }
     arr.sort((a, b) => {
       switch (sortKey) {
-        case "name": return a.account.localeCompare(b.account);
+        case "name": {
+          // Sort by number first (numeric), then label
+          const an = parseInt(a.number || "999999", 10);
+          const bn = parseInt(b.number || "999999", 10);
+          if (an !== bn) return an - bn;
+          return a.label.localeCompare(b.label);
+        }
         case "net": return Math.abs(b.net) - Math.abs(a.net);
         case "debit": return b.debit - a.debit;
         case "credit": return b.credit - a.credit;
@@ -119,7 +159,7 @@ export default function LedgerChart({ company, year: defaultYear }: Props) {
       }
     });
     return arr;
-  }, [entries, sortKey, showZero]);
+  }, [entries, sortKey, showZero, accountMeta]);
 
   const visible = aggregated.slice(0, maxRows);
   const maxValue = useMemo(() => {
@@ -240,21 +280,36 @@ export default function LedgerChart({ company, year: defaultYear }: Props) {
         ) : visible.length === 0 ? (
           <div className="text-center py-8 text-slate-400 text-sm">Geen mutaties in deze periode</div>
         ) : (
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {visible.map((a) => {
               const debitPct = (a.debit / maxValue) * 100;
               const creditPct = (a.credit / maxValue) * 100;
               return (
-                <div key={a.account} className="grid grid-cols-[minmax(180px,260px)_1fr_minmax(140px,auto)] gap-3 items-center text-xs">
-                  <div className="truncate text-slate-700" title={a.account}>{a.account}</div>
-                  <div className="flex flex-col gap-0.5">
-                    <div className="flex items-center gap-1">
-                      <div className="h-3 bg-blue-500 rounded-r" style={{ width: `${debitPct}%`, minWidth: a.debit > 0 ? 2 : 0 }} title={`Debet: ${fmtEur(a.debit)}`} />
-                      <span className="text-slate-500 text-[10px]">{a.debit > 0 ? fmtEur(a.debit) : ""}</span>
+                <div
+                  key={a.account}
+                  className="grid grid-cols-[minmax(180px,260px)_1fr_minmax(140px,auto)] gap-3 items-center text-xs h-[34px]"
+                >
+                  <div className="truncate text-slate-700" title={a.account}>{a.label}</div>
+                  <div className="flex flex-col justify-center gap-1">
+                    <div className="flex items-center gap-1 h-3">
+                      <div
+                        className="h-3 bg-blue-500 rounded-r"
+                        style={{ width: `${debitPct}%`, minWidth: a.debit > 0 ? 2 : 0 }}
+                        title={`Debet: ${fmtEur(a.debit)}`}
+                      />
+                      <span className="text-slate-500 text-[10px] whitespace-nowrap">
+                        {a.debit > 0 ? fmtEur(a.debit) : "—"}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <div className="h-3 bg-orange-500 rounded-r" style={{ width: `${creditPct}%`, minWidth: a.credit > 0 ? 2 : 0 }} title={`Credit: ${fmtEur(a.credit)}`} />
-                      <span className="text-slate-500 text-[10px]">{a.credit > 0 ? fmtEur(a.credit) : ""}</span>
+                    <div className="flex items-center gap-1 h-3">
+                      <div
+                        className="h-3 bg-orange-500 rounded-r"
+                        style={{ width: `${creditPct}%`, minWidth: a.credit > 0 ? 2 : 0 }}
+                        title={`Credit: ${fmtEur(a.credit)}`}
+                      />
+                      <span className="text-slate-500 text-[10px] whitespace-nowrap">
+                        {a.credit > 0 ? fmtEur(a.credit) : "—"}
+                      </span>
                     </div>
                   </div>
                   <div className={`text-right font-semibold ${a.net >= 0 ? "text-blue-700" : "text-orange-700"}`}>
