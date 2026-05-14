@@ -10,8 +10,11 @@ import {
   RotateCcw,
   Edit3,
   ExternalLink,
+  LayoutDashboard,
+  BarChart3,
 } from "lucide-react";
 import { yapp } from "./yapp-bridge";
+import LedgerChart from "./LedgerChart";
 
 const DEFAULT_COMPANY = "3BM Coöperatie U.A.";
 
@@ -140,6 +143,7 @@ export default function App() {
   const [piWithFile, setPiWithFile] = useState<Set<string>>(new Set());
 
   const [drill, setDrill] = useState<DrillKey | null>(null);
+  const [tab, setTab] = useState<"overview" | "ledger">("overview");
 
   useEffect(() => {
     localStorage.setItem("coop_admin_company", company);
@@ -291,6 +295,29 @@ export default function App() {
         </select>
       </div>
 
+      <div className="mb-4 flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-1 w-fit">
+        <button
+          onClick={() => setTab("overview")}
+          className={`flex items-center gap-2 px-4 py-1.5 text-sm rounded-md transition ${
+            tab === "overview" ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"
+          }`}
+        >
+          <LayoutDashboard size={14} /> Overzicht
+        </button>
+        <button
+          onClick={() => setTab("ledger")}
+          className={`flex items-center gap-2 px-4 py-1.5 text-sm rounded-md transition ${
+            tab === "ledger" ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"
+          }`}
+        >
+          <BarChart3 size={14} /> Grootboek mutaties
+        </button>
+      </div>
+
+      {tab === "ledger" ? (
+        <LedgerChart company={company} year={year} />
+      ) : (
+      <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         <StatCard label={labels.si_open}  count={stats.si_open.count}  amount={stats.si_open.amount}  icon={<FileText size={22} />}    tone="amber"  active={drill === "si_open"}  onClick={() => setDrill(drill === "si_open" ? null : "si_open")} />
         <StatCard label={labels.si_draft} count={stats.si_draft.count} amount={stats.si_draft.amount} icon={<Edit3 size={22} />}       tone="orange" active={drill === "si_draft"} onClick={() => setDrill(drill === "si_draft" ? null : "si_draft")} />
@@ -314,6 +341,8 @@ export default function App() {
 
       {!drill && !loading && (
         <div className="text-center text-sm text-slate-400 mt-8">Klik een kaart om de details te zien</div>
+      )}
+      </>
       )}
     </div>
   );
