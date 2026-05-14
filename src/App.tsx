@@ -255,7 +255,7 @@ export default function App() {
     <div className="p-3 sm:p-6 min-h-full bg-slate-100">
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">Coöp Penningmeester Dashboard</h2>
+          <h2 className="text-2xl font-bold text-slate-800">Penningmeester</h2>
           <p className="text-sm text-slate-500 mt-1">Overzicht openstaand, ontbrekende PDFs en losse betalingen</p>
         </div>
         <button
