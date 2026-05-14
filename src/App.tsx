@@ -12,9 +12,11 @@ import {
   ExternalLink,
   LayoutDashboard,
   BarChart3,
+  Receipt,
 } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 import LedgerChart from "./LedgerChart";
+import ExpensesTable from "./ExpensesTable";
 
 const DEFAULT_COMPANY = "3BM Coöperatie U.A.";
 
@@ -143,7 +145,7 @@ export default function App() {
   const [piWithFile, setPiWithFile] = useState<Set<string>>(new Set());
 
   const [drill, setDrill] = useState<DrillKey | null>(null);
-  const [tab, setTab] = useState<"overview" | "ledger">("overview");
+  const [tab, setTab] = useState<"overview" | "ledger" | "expenses">("overview");
 
   useEffect(() => {
     localStorage.setItem("coop_admin_company", company);
@@ -312,10 +314,20 @@ export default function App() {
         >
           <BarChart3 size={14} /> Grootboek mutaties
         </button>
+        <button
+          onClick={() => setTab("expenses")}
+          className={`flex items-center gap-2 px-4 py-1.5 text-sm rounded-md transition ${
+            tab === "expenses" ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"
+          }`}
+        >
+          <Receipt size={14} /> Uitgaven
+        </button>
       </div>
 
       {tab === "ledger" ? (
         <LedgerChart company={company} year={year} />
+      ) : tab === "expenses" ? (
+        <ExpensesTable company={company} year={year} erpAppUrl={erpAppUrl} />
       ) : (
       <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
