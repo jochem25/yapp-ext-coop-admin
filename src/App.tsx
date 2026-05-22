@@ -13,6 +13,7 @@ import {
   LayoutDashboard,
   BarChart3,
   Receipt,
+  Landmark,
 } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 import LedgerChart from "./LedgerChart";
@@ -52,6 +53,19 @@ interface PaymentEntry {
   unallocated_amount: number;
 }
 
+interface BankTransaction {
+  name: string;
+  date: string;
+  status: string;
+  bank_account: string;
+  deposit: number;
+  withdrawal: number;
+  unallocated_amount: number;
+  party: string;
+  bank_party_name: string;
+  docstatus: number;
+}
+
 interface FileAttachment {
   attached_to_name: string;
 }
@@ -67,7 +81,8 @@ type DrillKey =
   | "si_returns_open"
   | "pi_open"
   | "pi_no_pdf"
-  | "pe_unallocated";
+  | "pe_unallocated"
+  | "bt_unreconciled";
 
 const INTERCOMPANY_SUPPLIERS = new Set([
   "3BM bouwtechniek",
@@ -91,7 +106,7 @@ interface CardProps {
   count: number | null;
   amount: number | null;
   icon: React.ReactNode;
-  tone: "amber" | "orange" | "red" | "purple" | "slate" | "pink";
+  tone: "amber" | "orange" | "red" | "purple" | "slate" | "pink" | "indigo";
   active: boolean;
   onClick: () => void;
 }
@@ -103,6 +118,7 @@ const TONES: Record<CardProps["tone"], { bg: string; text: string }> = {
   purple: { bg: "bg-purple-100", text: "text-purple-600" },
   slate: { bg: "bg-slate-100", text: "text-slate-600" },
   pink: { bg: "bg-pink-100", text: "text-pink-600" },
+  indigo: { bg: "bg-indigo-100", text: "text-indigo-600" },
 };
 
 function StatCard({ label, count, amount, icon, tone, active, onClick }: CardProps) {
@@ -142,6 +158,7 @@ export default function App() {
   const [si, setSi] = useState<SalesInvoice[]>([]);
   const [pi, setPi] = useState<PurchaseInvoice[]>([]);
   const [pe, setPe] = useState<PaymentEntry[]>([]);
+  const [bt, setBt] = useState<BankTransaction[]>([]);
   const [piWithFile, setPiWithFile] = useState<Set<string>>(new Set());
 
   const [drill, setDrill] = useState<DrillKey | null>(null);
@@ -173,8 +190,16 @@ export default function App() {
     ];
     if (company) baseFilters.unshift(["company", "=", company]);
 
+    // Bank Transaction uses the "date" field instead of "posting_date".
+    const btFilters: unknown[][] = [
+      ["date", ">=", fromDate],
+      ["date", "<=", toDate],
+      ["docstatus", "!=", 2],
+    ];
+    if (company) btFilters.unshift(["company", "=", company]);
+
     try {
-      const [siList, piList, peList, fileList] = await Promise.all([
+      const [siList, piList, peList, btList, fileList] = await Promise.all([
         yapp.fetchList<SalesInvoice>("Sales Invoice", {
           fields: [
             "name", "posting_date", "due_date", "customer_name",
@@ -202,6 +227,15 @@ export default function App() {
           limit_page_length: 1000,
           order_by: "posting_date asc",
         }),
+        yapp.fetchList<BankTransaction>("Bank Transaction", {
+          fields: [
+            "name", "date", "status", "bank_account", "deposit", "withdrawal",
+            "unallocated_amount", "party", "bank_party_name", "docstatus",
+          ],
+          filters: btFilters,
+          limit_page_length: 2000,
+          order_by: "date asc",
+        }),
         yapp.fetchList<FileAttachment>("File", {
           fields: ["attached_to_name"],
           filters: [["attached_to_doctype", "=", "Purchase Invoice"]],
@@ -211,6 +245,7 @@ export default function App() {
       setSi(siList);
       setPi(piList);
       setPe(peList);
+      setBt(btList);
       setPiWithFile(new Set(fileList.map((f) => f.attached_to_name)));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Onbekende fout");
@@ -230,6 +265,7 @@ export default function App() {
       (x) => x.docstatus === 1 && !piWithFile.has(x.name) && !INTERCOMPANY_SUPPLIERS.has(x.supplier)
     );
     const peUnalloc = pe.filter((x) => Math.abs(x.unallocated_amount) > 0.01);
+    const btUnrec = bt.filter((x) => x.docstatus === 1 && x.unallocated_amount > 0.01);
     return {
       si_open: { items: siOpen, count: siOpen.length, amount: siOpen.reduce((s, x) => s + x.outstanding_amount, 0) },
       si_draft: { items: siDraft, count: siDraft.length, amount: siDraft.reduce((s, x) => s + x.grand_total, 0) },
@@ -237,8 +273,9 @@ export default function App() {
       pi_open: { items: piOpen, count: piOpen.length, amount: piOpen.reduce((s, x) => s + x.outstanding_amount, 0) },
       pi_no_pdf: { items: piNoPdf, count: piNoPdf.length, amount: piNoPdf.reduce((s, x) => s + x.grand_total, 0) },
       pe_unallocated: { items: peUnalloc, count: peUnalloc.length, amount: peUnalloc.reduce((s, x) => s + x.unallocated_amount, 0) },
+      bt_unreconciled: { items: btUnrec, count: btUnrec.length, amount: btUnrec.reduce((s, x) => s + x.unallocated_amount, 0) },
     };
-  }, [si, pi, pe, piWithFile]);
+  }, [si, pi, pe, bt, piWithFile]);
 
   const drillData = drill ? stats[drill] : null;
 
@@ -249,6 +286,7 @@ export default function App() {
     pi_open: "Inkoopfacturen openstaand",
     pi_no_pdf: "Inkoopfacturen zonder PDF",
     pe_unallocated: "Losse betalingen niet gekoppeld",
+    bt_unreconciled: "Banktransacties niet gekoppeld",
   };
 
   return (
@@ -256,7 +294,7 @@ export default function App() {
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Penningmeester</h2>
-          <p className="text-sm text-slate-500 mt-1">Overzicht openstaand, ontbrekende PDFs en losse betalingen</p>
+          <p className="text-sm text-slate-500 mt-1">Overzicht openstaand, ontbrekende PDFs, losse betalingen en banktransacties</p>
         </div>
         <button
           onClick={loadAll}
@@ -337,6 +375,7 @@ export default function App() {
         <StatCard label={labels.pi_open}  count={stats.pi_open.count}  amount={stats.pi_open.amount}  icon={<ShoppingCart size={22} />} tone="red"   active={drill === "pi_open"}  onClick={() => setDrill(drill === "pi_open" ? null : "pi_open")} />
         <StatCard label={labels.pi_no_pdf} count={stats.pi_no_pdf.count} amount={stats.pi_no_pdf.amount} icon={<Paperclip size={22} />} tone="slate" active={drill === "pi_no_pdf"} onClick={() => setDrill(drill === "pi_no_pdf" ? null : "pi_no_pdf")} />
         <StatCard label={labels.pe_unallocated} count={stats.pe_unallocated.count} amount={stats.pe_unallocated.amount} icon={<Banknote size={22} />} tone="purple" active={drill === "pe_unallocated"} onClick={() => setDrill(drill === "pe_unallocated" ? null : "pe_unallocated")} />
+        <StatCard label={labels.bt_unreconciled} count={stats.bt_unreconciled.count} amount={stats.bt_unreconciled.amount} icon={<Landmark size={22} />} tone="indigo" active={drill === "bt_unreconciled"} onClick={() => setDrill(drill === "bt_unreconciled" ? null : "bt_unreconciled")} />
       </div>
 
       {drill && drillData && (
@@ -347,7 +386,7 @@ export default function App() {
             </h3>
             <button onClick={() => setDrill(null)} className="text-xs text-slate-500 hover:text-slate-700">Sluiten</button>
           </div>
-          <DrillTable kind={drill} items={drillData.items as Array<SalesInvoice | PurchaseInvoice | PaymentEntry>} erpAppUrl={erpAppUrl} />
+          <DrillTable kind={drill} items={drillData.items as Array<SalesInvoice | PurchaseInvoice | PaymentEntry | BankTransaction>} erpAppUrl={erpAppUrl} />
         </div>
       )}
 
@@ -362,7 +401,7 @@ export default function App() {
 
 interface DrillTableProps {
   kind: DrillKey;
-  items: Array<SalesInvoice | PurchaseInvoice | PaymentEntry>;
+  items: Array<SalesInvoice | PurchaseInvoice | PaymentEntry | BankTransaction>;
   erpAppUrl: string;
 }
 
@@ -404,6 +443,45 @@ function DrillTable({ kind, items, erpAppUrl }: DrillTableProps) {
               </td>
             </tr>
           ))}
+        </tbody>
+      </table>
+    );
+  }
+
+  if (kind === "bt_unreconciled") {
+    const rows = items as BankTransaction[];
+    return (
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 border-b border-slate-200">
+          <tr>
+            <th className="text-left px-4 py-2 font-semibold text-slate-600">Datum</th>
+            <th className="text-left px-4 py-2 font-semibold text-slate-600">Bankrekening</th>
+            <th className="text-left px-4 py-2 font-semibold text-slate-600">Tegenpartij</th>
+            <th className="text-right px-4 py-2 font-semibold text-slate-600">Bedrag</th>
+            <th className="text-right px-4 py-2 font-semibold text-slate-600">Niet gekoppeld</th>
+            <th className="text-left px-4 py-2 font-semibold text-slate-600">Actie</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const signed = r.deposit - r.withdrawal;
+            return (
+              <tr key={r.name} className="border-b border-slate-100 hover:bg-slate-50">
+                <td className="px-4 py-2 text-slate-500">{r.date}</td>
+                <td className="px-4 py-2 text-slate-600">{r.bank_account}</td>
+                <td className="px-4 py-2">{r.bank_party_name || r.party || "-"}</td>
+                <td className={`px-4 py-2 text-right ${signed < 0 ? "text-red-600" : "text-emerald-600"}`}>
+                  {signed < 0 ? "− " : "+ "}{fmtEur(Math.abs(signed))}
+                </td>
+                <td className="px-4 py-2 text-right font-semibold text-indigo-700">{fmtEur(r.unallocated_amount)}</td>
+                <td className="px-4 py-2">
+                  <a href={docLink("Bank Transaction", r.name)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-teal-600 hover:underline">
+                    {r.name} <ExternalLink size={12} />
+                  </a>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     );

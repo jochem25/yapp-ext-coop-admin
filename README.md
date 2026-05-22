@@ -5,6 +5,7 @@ Dashboard voor 3BM Coöperatie U.A. administratie:
 - Openstaande inkoopfacturen
 - Inkoopfacturen zonder PDF-bijlage
 - Niet-gekoppelde Payment Entries
+- Niet-gekoppelde (unreconciled) banktransacties
 
 Bedrijf en jaar zijn instelbaar; default = 3BM Coöperatie U.A. + huidig jaar.
 
