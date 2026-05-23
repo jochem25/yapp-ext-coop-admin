@@ -14,10 +14,29 @@ import {
   BarChart3,
   Receipt,
   Landmark,
+  Send,
 } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 import LedgerChart from "./LedgerChart";
 import ExpensesTable from "./ExpensesTable";
+import PaymentBatch, { type BatchInvoice } from "./PaymentBatch";
+
+const PAID_BATCH_KEY = "coop_admin_paid_in_batch";
+
+function loadPaidSet(): Set<string> {
+  try {
+    const raw = localStorage.getItem(PAID_BATCH_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw) as unknown;
+    return Array.isArray(arr) ? new Set(arr.filter((x): x is string => typeof x === "string")) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function savePaidSet(s: Set<string>): void {
+  localStorage.setItem(PAID_BATCH_KEY, JSON.stringify(Array.from(s)));
+}
 
 const DEFAULT_COMPANY = "3BM Coöperatie U.A.";
 
@@ -163,6 +182,38 @@ export default function App() {
 
   const [drill, setDrill] = useState<DrillKey | null>(null);
   const [tab, setTab] = useState<"overview" | "ledger" | "expenses">("overview");
+
+  const [paidInBatch, setPaidInBatch] = useState<Set<string>>(() => loadPaidSet());
+  const [selectedPis, setSelectedPis] = useState<Set<string>>(new Set());
+  const [showBatch, setShowBatch] = useState(false);
+
+  function togglePi(name: string): void {
+    setSelectedPis((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+
+  function markBatchPaid(names: string[]): void {
+    setPaidInBatch((prev) => {
+      const next = new Set(prev);
+      for (const n of names) next.add(n);
+      savePaidSet(next);
+      return next;
+    });
+    setSelectedPis(new Set());
+  }
+
+  function clearPaidFlag(name: string): void {
+    setPaidInBatch((prev) => {
+      const next = new Set(prev);
+      next.delete(name);
+      savePaidSet(next);
+      return next;
+    });
+  }
 
   useEffect(() => {
     localStorage.setItem("coop_admin_company", company);
@@ -378,17 +429,89 @@ export default function App() {
         <StatCard label={labels.bt_unreconciled} count={stats.bt_unreconciled.count} amount={stats.bt_unreconciled.amount} icon={<Landmark size={22} />} tone="indigo" active={drill === "bt_unreconciled"} onClick={() => setDrill(drill === "bt_unreconciled" ? null : "bt_unreconciled")} />
       </div>
 
-      {drill && drillData && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">
-              {labels[drill]} ({drillData.count})
-            </h3>
-            <button onClick={() => setDrill(null)} className="text-xs text-slate-500 hover:text-slate-700">Sluiten</button>
+      {drill && drillData && (() => {
+        const isPiOpen = drill === "pi_open";
+        const piItems = isPiOpen ? (drillData.items as PurchaseInvoice[]) : [];
+        const selectableItems = piItems.filter((x) => !paidInBatch.has(x.name));
+        const selectedItems = piItems.filter((x) => selectedPis.has(x.name) && !paidInBatch.has(x.name));
+        const selectedTotal = selectedItems.reduce((s, x) => s + x.outstanding_amount, 0);
+        const allSelected = selectableItems.length > 0 && selectableItems.every((x) => selectedPis.has(x.name));
+
+        return (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-3">
+              <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">
+                {labels[drill]} ({drillData.count})
+              </h3>
+              <button onClick={() => setDrill(null)} className="text-xs text-slate-500 hover:text-slate-700">Sluiten</button>
+            </div>
+            {isPiOpen && (
+              <div className="px-5 py-3 bg-teal-50/50 border-b border-teal-100 flex items-center justify-between flex-wrap gap-3">
+                <div className="text-sm">
+                  <span className="font-semibold text-slate-700">{selectedItems.length}</span>
+                  <span className="text-slate-500"> van {selectableItems.length} geselecteerd · totaal </span>
+                  <span className="font-semibold text-teal-700">{fmtEur(selectedTotal)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (allSelected) {
+                        const next = new Set(selectedPis);
+                        for (const x of selectableItems) next.delete(x.name);
+                        setSelectedPis(next);
+                      } else {
+                        const next = new Set(selectedPis);
+                        for (const x of selectableItems) next.add(x.name);
+                        setSelectedPis(next);
+                      }
+                    }}
+                    className="text-xs px-3 py-1.5 border border-slate-300 rounded hover:bg-white"
+                  >
+                    {allSelected ? "Wis selectie" : "Selecteer alles"}
+                  </button>
+                  <button
+                    onClick={() => setShowBatch(true)}
+                    disabled={selectedItems.length === 0 || !company}
+                    className="flex items-center gap-2 text-sm px-3 py-1.5 bg-teal-600 text-white rounded hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                    title={!company ? "Kies eerst een bedrijf in het filter" : ""}
+                  >
+                    <Send size={14} /> Batch genereren
+                  </button>
+                </div>
+              </div>
+            )}
+            <DrillTable
+              kind={drill}
+              items={drillData.items as Array<SalesInvoice | PurchaseInvoice | PaymentEntry | BankTransaction>}
+              erpAppUrl={erpAppUrl}
+              selectedPis={selectedPis}
+              paidInBatch={paidInBatch}
+              onTogglePi={togglePi}
+              onClearPaid={clearPaidFlag}
+            />
           </div>
-          <DrillTable kind={drill} items={drillData.items as Array<SalesInvoice | PurchaseInvoice | PaymentEntry | BankTransaction>} erpAppUrl={erpAppUrl} />
-        </div>
-      )}
+        );
+      })()}
+
+      {showBatch && (() => {
+        const batchInvoices: BatchInvoice[] = pi
+          .filter((x) => selectedPis.has(x.name) && !paidInBatch.has(x.name))
+          .map((x) => ({
+            name: x.name,
+            bill_no: x.bill_no,
+            supplier: x.supplier,
+            supplier_name: x.supplier_name,
+            outstanding_amount: x.outstanding_amount,
+          }));
+        return (
+          <PaymentBatch
+            invoices={batchInvoices}
+            company={company}
+            onClose={() => setShowBatch(false)}
+            onPaid={markBatchPaid}
+          />
+        );
+      })()}
 
       {!drill && !loading && (
         <div className="text-center text-sm text-slate-400 mt-8">Klik een kaart om de details te zien</div>
@@ -403,9 +526,13 @@ interface DrillTableProps {
   kind: DrillKey;
   items: Array<SalesInvoice | PurchaseInvoice | PaymentEntry | BankTransaction>;
   erpAppUrl: string;
+  selectedPis?: Set<string>;
+  paidInBatch?: Set<string>;
+  onTogglePi?: (name: string) => void;
+  onClearPaid?: (name: string) => void;
 }
 
-function DrillTable({ kind, items, erpAppUrl }: DrillTableProps) {
+function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onTogglePi, onClearPaid }: DrillTableProps) {
   if (items.length === 0) {
     return <div className="px-5 py-8 text-center text-slate-400">Geen items in deze categorie</div>;
   }
@@ -525,10 +652,12 @@ function DrillTable({ kind, items, erpAppUrl }: DrillTableProps) {
   }
 
   const rows = items as PurchaseInvoice[];
+  const showSelect = kind === "pi_open" && !!onTogglePi;
   return (
     <table className="w-full text-sm">
       <thead className="bg-slate-50 border-b border-slate-200">
         <tr>
+          {showSelect && <th className="w-10 px-3 py-2"></th>}
           <th className="text-left px-4 py-2 font-semibold text-slate-600">Datum</th>
           <th className="text-left px-4 py-2 font-semibold text-slate-600">Leverancier</th>
           <th className="text-left px-4 py-2 font-semibold text-slate-600">Factuurnr</th>
@@ -541,8 +670,25 @@ function DrillTable({ kind, items, erpAppUrl }: DrillTableProps) {
         </tr>
       </thead>
       <tbody>
-        {rows.map((r) => (
-          <tr key={r.name} className="border-b border-slate-100 hover:bg-slate-50">
+        {rows.map((r) => {
+          const isPaid = !!paidInBatch?.has(r.name);
+          const isSelected = !!selectedPis?.has(r.name);
+          return (
+          <tr key={r.name} className={`border-b border-slate-100 hover:bg-slate-50 ${isPaid ? "bg-slate-50 text-slate-400" : ""}`}>
+            {showSelect && (
+              <td className="px-3 py-2 text-center">
+                {isPaid ? (
+                  <span className="text-[10px] text-slate-400">batch</span>
+                ) : (
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => onTogglePi?.(r.name)}
+                    className="cursor-pointer accent-teal-600"
+                  />
+                )}
+              </td>
+            )}
             <td className="px-4 py-2 text-slate-500">{r.posting_date}</td>
             <td className="px-4 py-2">{r.supplier_name}</td>
             <td className="px-4 py-2 text-slate-600">{r.bill_no || "-"}</td>
@@ -560,12 +706,21 @@ function DrillTable({ kind, items, erpAppUrl }: DrillTableProps) {
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-700">
                   <AlertTriangle size={12} /> Geen PDF
                 </span>
+              ) : isPaid ? (
+                <button
+                  onClick={() => onClearPaid?.(r.name)}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                  title="Klik om de batch-markering te verwijderen"
+                >
+                  In batch verstuurd
+                </button>
               ) : (
                 <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-700">{r.status}</span>
               )}
             </td>
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </table>
   );
