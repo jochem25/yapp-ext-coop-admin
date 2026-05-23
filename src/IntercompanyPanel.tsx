@@ -10,20 +10,24 @@ import { yapp } from "./yapp-bridge";
  * de Coöperatie als liquiditeit, wordt het jaar erop uitgekeerd als
  * winstuitkering.
  *
- * Bron: Purchase Invoice waar company = Coöp + supplier in werkmij's.
+ * Bron: Purchase Invoice waar company = Coöp + supplier in entiteiten-set.
  * Berekening op net_total (exclusief BTW), want BTW is doorlopende post.
  */
 
 const COOP_COMPANY = "3BM Coöperatie U.A.";
 
 const INTERCO_SUPPLIERS = [
-  "3BM bouwtechniek",
+  "3BM bouwtechniek",          // legacy ERPNext-id van vóór de V.O.F.-rename
   "3BM Bouwtechniek V.O.F.",
   "3BM Engineering",
   "3BM Bouwkunde",
 ];
 
-const INTERCO_CUSTOMERS = INTERCO_SUPPLIERS;
+const INTERCO_CUSTOMERS = [
+  "3BM Bouwtechniek V.O.F.",
+  "3BM Engineering",
+  "3BM Bouwkunde",
+];
 
 interface PurchaseInvoiceForInterco {
   name: string;
@@ -126,8 +130,6 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
             ["company", "=", COOP_COMPANY],
             ["outstanding_amount", ">", 0],
             ["docstatus", "=", 1],
-            ["posting_date", ">=", fromDate],
-            ["posting_date", "<=", toDate],
           ],
           limit_page_length: 2000,
           order_by: "posting_date asc",
@@ -292,7 +294,7 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
         <div>
           <h3 className="text-lg font-semibold text-slate-800">Winstuitkering — 20% restant per entiteit</h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            80%-facturen van werkmijen aan {COOP_COMPANY}. 20% blijft als liquiditeit, wordt het jaar erop uitgekeerd.
+            80%-facturen van entiteiten aan {COOP_COMPANY}. 20% blijft als liquiditeit, wordt het jaar erop uitgekeerd.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -424,9 +426,9 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
       )}
 
       <div className="mt-8 mb-3">
-        <h4 className="text-base font-semibold text-slate-800">Openstaand naar werkmijen</h4>
+        <h4 className="text-base font-semibold text-slate-800">Openstaand naar entiteiten</h4>
         <p className="text-xs text-slate-500 mt-0.5">
-          Onbetaalde inkoopfacturen van werkmijen aan {COOP_COMPANY} — alle jaren, niet beperkt tot {year}.
+          Onbetaalde inkoopfacturen van entiteiten aan {COOP_COMPANY} — alle jaren, niet beperkt tot {year}.
         </p>
       </div>
 
@@ -519,7 +521,7 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
       </div>
 
       <div className="mt-8 mb-3">
-        <h4 className="text-base font-semibold text-slate-800">Totaal nog te betalen aan werkmijen</h4>
+        <h4 className="text-base font-semibold text-slate-800">Totaal nog te betalen aan entiteiten</h4>
         <p className="text-xs text-slate-500 mt-0.5">
           20% reserve uit {year} (uit te keren in {year + 1}) plus de openstaande inkoopfacturen.
         </p>
@@ -557,9 +559,9 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
       </div>
 
       <div className="mt-8 mb-3">
-        <h4 className="text-base font-semibold text-slate-800">Openstaande verkoopfacturen {year} — externe klanten</h4>
+        <h4 className="text-base font-semibold text-slate-800">Openstaande verkoopfacturen — externe klanten</h4>
         <p className="text-xs text-slate-500 mt-0.5">
-          Door {COOP_COMPANY} verstuurd in {year}, nog niet (volledig) betaald. Intercompany hieronder apart.
+          Door {COOP_COMPANY} verstuurd, nog niet (volledig) betaald (alle jaren). Intercompany hieronder apart.
         </p>
       </div>
 
@@ -568,13 +570,13 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
         total={externalTotal}
         accent="amber"
         docLink={docLink}
-        emptyMessage={`Geen openstaande externe verkoopfacturen van ${year}.`}
+        emptyMessage="Geen openstaande externe verkoopfacturen."
       />
 
       <div className="mt-8 mb-3">
-        <h4 className="text-base font-semibold text-slate-800">Openstaande intercompany verkoopfacturen {year}</h4>
+        <h4 className="text-base font-semibold text-slate-800">Openstaande intercompany verkoopfacturen</h4>
         <p className="text-xs text-slate-500 mt-0.5">
-          Verstuurd aan werkmijen ({INTERCO_CUSTOMERS.join(", ")}).
+          Verstuurd aan entiteiten ({INTERCO_CUSTOMERS.join(", ")}).
         </p>
       </div>
 
@@ -583,7 +585,7 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
         total={intercoTotal}
         accent="indigo"
         docLink={docLink}
-        emptyMessage={`Geen openstaande intercompany verkoopfacturen van ${year}.`}
+        emptyMessage="Geen openstaande intercompany verkoopfacturen."
       />
 
       <div className="mt-4 p-3 bg-slate-50 border border-slate-200 rounded text-xs text-slate-600">
