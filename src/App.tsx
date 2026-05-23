@@ -438,9 +438,9 @@ export default function App() {
       ) : tab === "expenses" ? (
         <ExpensesTable company={company} year={year} erpAppUrl={erpAppUrl} />
       ) : tab === "winstuitkering" ? (
-        <IntercompanyPanel company={company} erpAppUrl={erpAppUrl} />
+        <IntercompanyPanel company={company} year={year} erpAppUrl={erpAppUrl} />
       ) : tab === "kostenmatrix" ? (
-        <CostMatrix company={company} erpAppUrl={erpAppUrl} />
+        <CostMatrix company={company} year={year} erpAppUrl={erpAppUrl} />
       ) : (
       <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">

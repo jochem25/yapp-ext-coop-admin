@@ -43,12 +43,9 @@ function fmtEur(n: number): string {
   })}`;
 }
 
-function thisYear(): number {
-  return new Date().getFullYear();
-}
-
 interface Props {
   company: string;
+  year: number;
   erpAppUrl: string;
 }
 
@@ -61,8 +58,7 @@ interface EntityStats {
   reserve20: number;  // 20% restant = sumNet * 0.25
 }
 
-export default function IntercompanyPanel({ company, erpAppUrl }: Props) {
-  const [year, setYear] = useState<number>(thisYear());
+export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pis, setPis] = useState<PurchaseInvoiceForInterco[]>([]);
@@ -253,15 +249,6 @@ export default function IntercompanyPanel({ company, erpAppUrl }: Props) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <select
-            value={year}
-            onChange={(e) => setYear(parseInt(e.target.value, 10))}
-            className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-          >
-            {Array.from({ length: 5 }, (_, i) => thisYear() - i).map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
           <button
             onClick={load}
             disabled={loading}

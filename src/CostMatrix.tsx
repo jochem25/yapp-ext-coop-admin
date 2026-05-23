@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { RefreshCw, ChevronDown, ChevronRight, ExternalLink, Calendar } from "lucide-react";
+import { RefreshCw, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 
 /**
@@ -51,10 +51,6 @@ function fmtEurFull(n: number): string {
   })}`;
 }
 
-function thisYear(): number {
-  return new Date().getFullYear();
-}
-
 function monthIndex(isoDate: string): number {
   // "2025-03-14" → 2 (March)
   return parseInt(isoDate.slice(5, 7), 10) - 1;
@@ -62,11 +58,11 @@ function monthIndex(isoDate: string): number {
 
 interface Props {
   company: string;
+  year: number;
   erpAppUrl: string;
 }
 
-export default function CostMatrix({ company, erpAppUrl }: Props) {
-  const [year, setYear] = useState<number>(thisYear());
+export default function CostMatrix({ company, year, erpAppUrl }: Props) {
   const [groupMode, setGroupMode] = useState<GroupMode>("account");
   const [hideEmpty, setHideEmpty] = useState<boolean>(true);
   const [loading, setLoading] = useState(false);
@@ -246,26 +242,14 @@ export default function CostMatrix({ company, erpAppUrl }: Props) {
             {!company && " · Geen bedrijf gekozen: toont alle entiteiten."}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Calendar size={14} className="text-slate-400" />
-          <select
-            value={year}
-            onChange={(e) => setYear(parseInt(e.target.value, 10))}
-            className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-          >
-            {Array.from({ length: 5 }, (_, i) => thisYear() - i).map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-          <button
-            onClick={load}
-            disabled={loading}
-            className="flex items-center gap-2 px-3 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 cursor-pointer text-sm"
-          >
-            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-            Vernieuwen
-          </button>
-        </div>
+        <button
+          onClick={load}
+          disabled={loading}
+          className="flex items-center gap-2 px-3 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 cursor-pointer text-sm"
+        >
+          <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+          Vernieuwen
+        </button>
       </div>
 
       <div className="mb-3 flex items-center gap-3 text-sm flex-wrap">
