@@ -18,6 +18,7 @@ const COOP_COMPANY = "3BM Coöperatie U.A.";
 
 const INTERCO_SUPPLIERS = [
   "3BM bouwtechniek",
+  "3BM Bouwtechniek V.O.F.",
   "3BM Engineering",
   "3BM Bouwkunde",
 ];

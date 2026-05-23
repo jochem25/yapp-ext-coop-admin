@@ -109,6 +109,7 @@ type DrillKey =
 
 const INTERCOMPANY_SUPPLIERS = new Set([
   "3BM bouwtechniek",
+  "3BM Bouwtechniek V.O.F.",
   "3BM Engineering",
   "3BM Bouwkunde",
 ]);
