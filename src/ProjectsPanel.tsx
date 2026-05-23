@@ -55,6 +55,35 @@ interface PI {
   status: string;
 }
 
+interface PIItem {
+  project?: string | null;
+  description?: string | null;
+  net_amount?: number;
+}
+
+interface PIFullDoc {
+  name: string;
+  items: PIItem[];
+}
+
+/**
+ * Voor PI's waar header.project leeg is: parse items[].description voor
+ * een project-nummer. ERPNext schrijft op intercompany-PI's vaak
+ * "project 2459 Gouda_Harderwijkweg" in de item-omschrijving.
+ */
+function extractProjectFromDescription(desc: string | null | undefined): string | null {
+  if (!desc) return null;
+  const m = desc.match(/project\s+([0-9]{3,})/i);
+  return m ? m[1] : null;
+}
+
+interface PiAllocation {
+  piName: string;
+  project: string;
+  netAmount: number;
+  source: "header" | "item.project" | "item.description";
+}
+
 type Status = "match" | "onderbelast" | "overbelast" | "alleen-coop" | "alleen-entiteiten";
 
 interface ProjectRow {
@@ -90,9 +119,12 @@ const STATUS_LABELS: Record<Status, { label: string; chip: string }> = {
 
 export default function ProjectsPanel({ company, erpAppUrl }: Props) {
   const [loading, setLoading] = useState(false);
+  const [enriching, setEnriching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sis, setSis] = useState<SI[]>([]);
   const [pis, setPis] = useState<PI[]>([]);
+  const [allocations, setAllocations] = useState<PiAllocation[]>([]);
+  const [unlinkedCount, setUnlinkedCount] = useState({ total: 0, mapped: 0 });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [filterStatus, setFilterStatus] = useState<"all" | Status>("all");
 
@@ -101,6 +133,8 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
   async function load() {
     setLoading(true);
     setError(null);
+    setAllocations([]);
+    setUnlinkedCount({ total: 0, mapped: 0 });
     try {
       const [siList, piList] = await Promise.all([
         yapp.fetchList<SI>("Sales Invoice", {
@@ -116,6 +150,7 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
           limit_page_length: 5000,
           order_by: "posting_date asc",
         }),
+        // Belangrijk: GEEN project!="" filter — we hebben ook PI's zonder header.project nodig
         yapp.fetchList<PI>("Purchase Invoice", {
           fields: [
             "name", "posting_date", "supplier", "supplier_name", "project",
@@ -125,7 +160,6 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
             ["company", "=", COOP_COMPANY],
             ["supplier", "in", INTERCO_SUPPLIERS],
             ["docstatus", "=", 1],
-            ["project", "!=", ""],
           ],
           limit_page_length: 5000,
           order_by: "posting_date asc",
@@ -133,8 +167,72 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
       ]);
       setSis(siList);
       setPis(piList);
+
+      // Bouw initiële allocations: PI met header.project gevuld
+      const baseAlloc: PiAllocation[] = [];
+      const unlinked: PI[] = [];
+      for (const p of piList) {
+        if (p.project) {
+          baseAlloc.push({
+            piName: p.name,
+            project: p.project,
+            netAmount: p.net_total,
+            source: "header",
+          });
+        } else {
+          unlinked.push(p);
+        }
+      }
+      setAllocations(baseAlloc);
+      setUnlinkedCount({ total: unlinked.length, mapped: 0 });
+
+      // Fase 2 (async, niet blocking): per unlinked PI items ophalen en project parsen
+      if (unlinked.length > 0) {
+        setEnriching(true);
+        const enriched: PiAllocation[] = [];
+        let mapped = 0;
+        const results = await Promise.all(
+          unlinked.map((p) =>
+            yapp.fetchDocument<PIFullDoc>("Purchase Invoice", p.name).catch(() => null),
+          ),
+        );
+        for (let i = 0; i < unlinked.length; i++) {
+          const p = unlinked[i];
+          const doc = results[i];
+          if (!doc || !doc.items) continue;
+          // Per item: detecteer project (item.project of regex op description)
+          const perProject = new Map<string, { amount: number; source: PiAllocation["source"] }>();
+          for (const it of doc.items) {
+            const projFromField = it.project ?? null;
+            const projFromDesc = projFromField ? null : extractProjectFromDescription(it.description);
+            const proj = projFromField || projFromDesc;
+            if (!proj) continue;
+            const src: PiAllocation["source"] = projFromField ? "item.project" : "item.description";
+            const cur = perProject.get(proj);
+            const amt = it.net_amount ?? 0;
+            if (cur) {
+              cur.amount += amt;
+            } else {
+              perProject.set(proj, { amount: amt, source: src });
+            }
+          }
+          if (perProject.size > 0) mapped += 1;
+          for (const [proj, info] of perProject.entries()) {
+            enriched.push({
+              piName: p.name,
+              project: proj,
+              netAmount: info.amount,
+              source: info.source,
+            });
+          }
+        }
+        setAllocations([...baseAlloc, ...enriched]);
+        setUnlinkedCount({ total: unlinked.length, mapped });
+        setEnriching(false);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Onbekende fout");
+      setEnriching(false);
     } finally {
       setLoading(false);
     }
@@ -166,10 +264,16 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
       r.siTotal += s.net_total;
       r.siCount += 1;
     }
-    for (const p of pis) {
-      const r = ensure(p.project);
-      r.pi80 += p.net_total;
-      r.piCount += 1;
+    // Allocations: één entry per (PI, project). Bij multi-project-PI's tel je per project.
+    const piCountedPerProject = new Set<string>();
+    for (const a of allocations) {
+      const r = ensure(a.project);
+      r.pi80 += a.netAmount;
+      const key = `${a.piName}|${a.project}`;
+      if (!piCountedPerProject.has(key)) {
+        r.piCount += 1;
+        piCountedPerProject.add(key);
+      }
     }
     for (const r of map.values()) {
       r.pi100 = r.pi80 / 0.80;
@@ -192,7 +296,7 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
       if (pa !== pb) return pa - pb;
       return Math.abs(b.delta) - Math.abs(a.delta);
     });
-  }, [externalSis, pis]);
+  }, [externalSis, allocations]);
 
   const visibleRows = useMemo(
     () => filterStatus === "all" ? projectRows : projectRows.filter((r) => r.status === filterStatus),
@@ -221,15 +325,20 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
     return m;
   }, [externalSis]);
 
+  /** Voor de detail-expand: per project de PI's plus de toegekende bedragen + source. */
   const pisByProject = useMemo(() => {
-    const m = new Map<string, PI[]>();
-    for (const p of pis) {
-      const arr = m.get(p.project) ?? [];
-      arr.push(p);
-      m.set(p.project, arr);
+    const piMap = new Map<string, PI>();
+    for (const p of pis) piMap.set(p.name, p);
+    const m = new Map<string, Array<PI & { allocAmount: number; allocSource: PiAllocation["source"] }>>();
+    for (const a of allocations) {
+      const pi = piMap.get(a.piName);
+      if (!pi) continue;
+      const arr = m.get(a.project) ?? [];
+      arr.push({ ...pi, allocAmount: a.netAmount, allocSource: a.source });
+      m.set(a.project, arr);
     }
     return m;
-  }, [pis]);
+  }, [pis, allocations]);
 
   function toggle(project: string): void {
     setExpanded((prev) => {
@@ -287,6 +396,25 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
 
       {error && (
         <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">{error}</div>
+      )}
+
+      {(enriching || unlinkedCount.total > 0) && (
+        <div className="mb-3 p-3 bg-sky-50 border border-sky-200 rounded text-xs text-sky-800 flex items-start gap-2">
+          <Info size={14} className="shrink-0 mt-0.5" />
+          <div>
+            {enriching ? (
+              <>Items van {unlinkedCount.total} PI's zonder header-project worden geanalyseerd…</>
+            ) : (
+              <>
+                <strong>{unlinkedCount.mapped}</strong> van <strong>{unlinkedCount.total}</strong> PI's
+                zonder header-project zijn via item-omschrijving (regex op "project NNNN") gekoppeld.
+                {unlinkedCount.total - unlinkedCount.mapped > 0 && (
+                  <> {unlinkedCount.total - unlinkedCount.mapped} PI's blijven losgekoppeld — vul header.project in ERPNext voor schone data.</>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       <div className="mb-3 flex items-center gap-1 flex-wrap text-xs">
@@ -426,12 +554,13 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
                                     <th className="text-left py-1">Datum</th>
                                     <th className="text-left py-1">Entiteit</th>
                                     <th className="text-left py-1">PI</th>
+                                    <th className="text-left py-1">Bron</th>
                                     <th className="text-right py-1">80% excl BTW</th>
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {projPis.map((p) => (
-                                    <tr key={p.name} className="text-slate-700">
+                                    <tr key={`${p.name}-${p.allocSource}`} className="text-slate-700">
                                       <td className="py-1">{p.posting_date}</td>
                                       <td className="py-1 truncate max-w-[140px]">{p.supplier_name}</td>
                                       <td className="py-1">
@@ -445,7 +574,17 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
                                           {p.name}
                                         </a>
                                       </td>
-                                      <td className="py-1 text-right tabular-nums">{fmtEur(p.net_total)}</td>
+                                      <td className="py-1">
+                                        <span className={`inline-block px-1.5 py-0.5 text-[9px] rounded ${
+                                          p.allocSource === "header" ? "bg-emerald-50 text-emerald-700" :
+                                          p.allocSource === "item.project" ? "bg-sky-50 text-sky-700" :
+                                          "bg-amber-50 text-amber-700"
+                                        }`}>
+                                          {p.allocSource === "header" ? "header" :
+                                           p.allocSource === "item.project" ? "item-veld" : "uit tekst"}
+                                        </span>
+                                      </td>
+                                      <td className="py-1 text-right tabular-nums">{fmtEur(p.allocAmount)}</td>
                                     </tr>
                                   ))}
                                 </tbody>
