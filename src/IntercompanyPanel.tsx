@@ -22,6 +22,8 @@ const INTERCO_SUPPLIERS = [
   "3BM Bouwkunde",
 ];
 
+const INTERCO_CUSTOMERS = INTERCO_SUPPLIERS;
+
 interface PurchaseInvoiceForInterco {
   name: string;
   posting_date: string;
@@ -34,6 +36,17 @@ interface PurchaseInvoiceForInterco {
   outstanding_amount: number;
   status: string;
   docstatus: number;
+}
+
+interface OpenSalesInvoice {
+  name: string;
+  posting_date: string;
+  due_date: string;
+  customer: string;
+  customer_name: string;
+  grand_total: number;
+  outstanding_amount: number;
+  status: string;
 }
 
 function fmtEur(n: number): string {
@@ -63,6 +76,7 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [pis, setPis] = useState<PurchaseInvoiceForInterco[]>([]);
   const [openPis, setOpenPis] = useState<PurchaseInvoiceForInterco[]>([]);
+  const [openSis, setOpenSis] = useState<OpenSalesInvoice[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [expandedOpen, setExpandedOpen] = useState<Set<string>>(new Set());
 
@@ -78,7 +92,7 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
         "name", "posting_date", "due_date", "supplier", "supplier_name", "bill_no",
         "net_total", "grand_total", "outstanding_amount", "status", "docstatus",
       ];
-      const [list, openList] = await Promise.all([
+      const [list, openList, openSiList] = await Promise.all([
         yapp.fetchList<PurchaseInvoiceForInterco>("Purchase Invoice", {
           fields,
           filters: [
@@ -102,9 +116,25 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
           limit_page_length: 2000,
           order_by: "posting_date asc",
         }),
+        yapp.fetchList<OpenSalesInvoice>("Sales Invoice", {
+          fields: [
+            "name", "posting_date", "due_date", "customer", "customer_name",
+            "grand_total", "outstanding_amount", "status",
+          ],
+          filters: [
+            ["company", "=", COOP_COMPANY],
+            ["outstanding_amount", ">", 0],
+            ["docstatus", "=", 1],
+            ["posting_date", ">=", fromDate],
+            ["posting_date", "<=", toDate],
+          ],
+          limit_page_length: 2000,
+          order_by: "posting_date asc",
+        }),
       ]);
       setPis(list);
       setOpenPis(openList);
+      setOpenSis(openSiList);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Onbekende fout");
     } finally {
@@ -223,6 +253,22 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
       return next;
     });
   }
+
+  const { externalSis, intercoSis, externalTotal, intercoTotal } = useMemo(() => {
+    const ext: OpenSalesInvoice[] = [];
+    const inter: OpenSalesInvoice[] = [];
+    for (const si of openSis) {
+      if (INTERCO_CUSTOMERS.includes(si.customer)) inter.push(si);
+      else ext.push(si);
+    }
+    const sum = (arr: OpenSalesInvoice[]) => arr.reduce((s, x) => s + x.outstanding_amount, 0);
+    return {
+      externalSis: ext,
+      intercoSis: inter,
+      externalTotal: sum(ext),
+      intercoTotal: sum(inter),
+    };
+  }, [openSis]);
 
   function toggle(supplier: string): void {
     setExpanded((prev) => {
@@ -509,11 +555,112 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
         </table>
       </div>
 
+      <div className="mt-8 mb-3">
+        <h4 className="text-base font-semibold text-slate-800">Openstaande verkoopfacturen {year} — externe klanten</h4>
+        <p className="text-xs text-slate-500 mt-0.5">
+          Door {COOP_COMPANY} verstuurd in {year}, nog niet (volledig) betaald. Intercompany hieronder apart.
+        </p>
+      </div>
+
+      <OpenSiTable
+        rows={externalSis}
+        total={externalTotal}
+        accent="amber"
+        docLink={docLink}
+        emptyMessage={`Geen openstaande externe verkoopfacturen van ${year}.`}
+      />
+
+      <div className="mt-8 mb-3">
+        <h4 className="text-base font-semibold text-slate-800">Openstaande intercompany verkoopfacturen {year}</h4>
+        <p className="text-xs text-slate-500 mt-0.5">
+          Verstuurd aan werkmijen ({INTERCO_CUSTOMERS.join(", ")}).
+        </p>
+      </div>
+
+      <OpenSiTable
+        rows={intercoSis}
+        total={intercoTotal}
+        accent="indigo"
+        docLink={docLink}
+        emptyMessage={`Geen openstaande intercompany verkoopfacturen van ${year}.`}
+      />
+
       <div className="mt-4 p-3 bg-slate-50 border border-slate-200 rounded text-xs text-slate-600">
         <strong className="text-slate-700">Berekening:</strong> 80%-bedrag = som van net_total (excl BTW) van Purchase Invoices.
         100% basis = som ÷ 0,80. 20% restant = som × 0,25 (= 20%/80%).
         Uit te keren in {year + 1} als winstuitkering naar de werkmaatschappijen.
       </div>
+    </div>
+  );
+}
+
+interface OpenSiTableProps {
+  rows: OpenSalesInvoice[];
+  total: number;
+  accent: "amber" | "indigo";
+  docLink: (doctype: string, name: string) => string;
+  emptyMessage: string;
+}
+
+function OpenSiTable({ rows, total, accent, docLink, emptyMessage }: OpenSiTableProps) {
+  const accentClass = accent === "amber" ? "text-amber-700" : "text-indigo-700";
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 border-b border-slate-200">
+          <tr>
+            <th className="text-left px-4 py-2 font-semibold text-slate-600">Datum</th>
+            <th className="text-left px-4 py-2 font-semibold text-slate-600">Vervaldatum</th>
+            <th className="text-left px-4 py-2 font-semibold text-slate-600">Klant</th>
+            <th className="text-left px-4 py-2 font-semibold text-slate-600">Factuur</th>
+            <th className="text-right px-4 py-2 font-semibold text-slate-600">Totaal</th>
+            <th className={`text-right px-4 py-2 font-semibold ${accentClass}`}>Openstaand</th>
+            <th className="text-left px-4 py-2 font-semibold text-slate-600">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={7} className="px-4 py-6 text-center text-slate-400 text-sm">
+                {emptyMessage}
+              </td>
+            </tr>
+          ) : (
+            rows.map((r) => (
+              <tr key={r.name} className="border-b border-slate-100 hover:bg-slate-50">
+                <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{r.posting_date}</td>
+                <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{r.due_date || "-"}</td>
+                <td className="px-4 py-2">{r.customer_name}</td>
+                <td className="px-4 py-2">
+                  <a
+                    href={docLink("Sales Invoice", r.name)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-teal-600 hover:underline inline-flex items-center gap-1"
+                  >
+                    {r.name} <ExternalLink size={10} />
+                  </a>
+                </td>
+                <td className="px-4 py-2 text-right text-slate-500">{fmtEur(r.grand_total)}</td>
+                <td className={`px-4 py-2 text-right font-semibold ${accentClass}`}>{fmtEur(r.outstanding_amount)}</td>
+                <td className="px-4 py-2">
+                  <span className="inline-block px-2 py-0.5 text-[10px] rounded-full bg-slate-100 text-slate-700">{r.status}</span>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+        {rows.length > 0 && (
+          <tfoot className="bg-slate-50 border-t border-slate-200 font-semibold">
+            <tr>
+              <td colSpan={4} className="px-4 py-2 text-slate-700">Totaal ({rows.length})</td>
+              <td></td>
+              <td className={`px-4 py-2 text-right ${accentClass}`}>{fmtEur(total)}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        )}
+      </table>
     </div>
   );
 }
