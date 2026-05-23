@@ -6,6 +6,7 @@ interface Account {
   name: string;
   account_name: string;
   account_number: string | null;
+  custom_account_nl: string | null;
   root_type: string;
 }
 
@@ -65,7 +66,7 @@ export default function ExpensesTable({ company, year: defaultYear, erpAppUrl }:
     ];
     if (company) filters.push(["company", "=", company]);
     yapp.fetchList<Account>("Account", {
-      fields: ["name", "account_name", "account_number", "root_type"],
+      fields: ["name", "account_name", "account_number", "custom_account_nl", "root_type"],
       filters,
       limit_page_length: 500,
     })
@@ -117,9 +118,13 @@ export default function ExpensesTable({ company, year: defaultYear, erpAppUrl }:
   useEffect(() => { load(); }, [company, year, month, accountFilter, expenseAccounts.length]);
 
   const accountMeta = useMemo(() => {
-    const m = new Map<string, { number: string; name: string }>();
+    const m = new Map<string, { nl: string; number: string; name: string }>();
     for (const a of expenseAccounts) {
-      m.set(a.name, { number: a.account_number ?? "", name: a.account_name });
+      m.set(a.name, {
+        nl: a.custom_account_nl ?? "",
+        number: a.account_number ?? "",
+        name: a.account_name,
+      });
     }
     return m;
   }, [expenseAccounts]);
@@ -169,6 +174,7 @@ export default function ExpensesTable({ company, year: defaultYear, erpAppUrl }:
   function accountLabel(account: string): string {
     const meta = accountMeta.get(account);
     if (!meta) return account;
+    if (meta.nl) return meta.nl;
     return meta.number ? `${meta.number} ${meta.name}` : meta.name;
   }
 
@@ -219,13 +225,14 @@ export default function ExpensesTable({ company, year: defaultYear, erpAppUrl }:
           {expenseAccounts
             .slice()
             .sort((a, b) => {
-              const an = parseInt(a.account_number ?? "999999", 10);
-              const bn = parseInt(b.account_number ?? "999999", 10);
-              return an - bn;
+              const ai = parseInt((a.custom_account_nl ?? a.account_number ?? "999999").match(/^\d+/)?.[0] ?? "999999", 10);
+              const bi = parseInt((b.custom_account_nl ?? b.account_number ?? "999999").match(/^\d+/)?.[0] ?? "999999", 10);
+              return ai - bi;
             })
             .map((a) => (
               <option key={a.name} value={a.name}>
-                {a.account_number ? `${a.account_number} ${a.account_name}` : a.account_name}
+                {a.custom_account_nl
+                  || (a.account_number ? `${a.account_number} ${a.account_name}` : a.account_name)}
               </option>
             ))}
         </select>

@@ -13,6 +13,7 @@ interface Account {
   name: string;
   account_name: string;
   account_number: string | null;
+  custom_account_nl: string | null;
 }
 
 interface GLEntry {
@@ -82,7 +83,7 @@ export default function CostMatrix({ company, erpAppUrl }: Props) {
     ];
     if (company) filters.push(["company", "=", company]);
     yapp.fetchList<Account>("Account", {
-      fields: ["name", "account_name", "account_number"],
+      fields: ["name", "account_name", "account_number", "custom_account_nl"],
       filters,
       limit_page_length: 500,
     })
@@ -129,9 +130,13 @@ export default function CostMatrix({ company, erpAppUrl }: Props) {
   useEffect(() => { load(); }, [year, company, expenseAccounts.length]);
 
   const accountMeta = useMemo(() => {
-    const m = new Map<string, { number: string; name: string }>();
+    const m = new Map<string, { nl: string; number: string; name: string }>();
     for (const a of expenseAccounts) {
-      m.set(a.name, { number: a.account_number ?? "", name: a.account_name });
+      m.set(a.name, {
+        nl: a.custom_account_nl ?? "",
+        number: a.account_number ?? "",
+        name: a.account_name,
+      });
     }
     return m;
   }, [expenseAccounts]);
@@ -139,6 +144,7 @@ export default function CostMatrix({ company, erpAppUrl }: Props) {
   function accountLabel(account: string): string {
     const meta = accountMeta.get(account);
     if (!meta) return account;
+    if (meta.nl) return meta.nl;
     return meta.number ? `${meta.number} ${meta.name}` : meta.name;
   }
 
