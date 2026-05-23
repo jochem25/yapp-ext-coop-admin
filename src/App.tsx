@@ -16,12 +16,14 @@ import {
   Landmark,
   Send,
   Coins,
+  Table2,
 } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 import LedgerChart from "./LedgerChart";
 import ExpensesTable from "./ExpensesTable";
 import PaymentBatch, { type BatchInvoice } from "./PaymentBatch";
 import IntercompanyPanel from "./IntercompanyPanel";
+import CostMatrix from "./CostMatrix";
 
 const PAID_BATCH_KEY = "coop_admin_paid_in_batch";
 
@@ -183,7 +185,7 @@ export default function App() {
   const [piWithFile, setPiWithFile] = useState<Set<string>>(new Set());
 
   const [drill, setDrill] = useState<DrillKey | null>(null);
-  const [tab, setTab] = useState<"overview" | "ledger" | "expenses" | "winstuitkering">("overview");
+  const [tab, setTab] = useState<"overview" | "ledger" | "expenses" | "winstuitkering" | "kostenmatrix">("overview");
 
   const [paidInBatch, setPaidInBatch] = useState<Set<string>>(() => loadPaidSet());
   const [selectedPis, setSelectedPis] = useState<Set<string>>(new Set());
@@ -421,6 +423,14 @@ export default function App() {
         >
           <Coins size={14} /> Winstuitkering
         </button>
+        <button
+          onClick={() => setTab("kostenmatrix")}
+          className={`flex items-center gap-2 px-4 py-1.5 text-sm rounded-md transition ${
+            tab === "kostenmatrix" ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"
+          }`}
+        >
+          <Table2 size={14} /> Kostenmatrix
+        </button>
       </div>
 
       {tab === "ledger" ? (
@@ -429,6 +439,8 @@ export default function App() {
         <ExpensesTable company={company} year={year} erpAppUrl={erpAppUrl} />
       ) : tab === "winstuitkering" ? (
         <IntercompanyPanel company={company} erpAppUrl={erpAppUrl} />
+      ) : tab === "kostenmatrix" ? (
+        <CostMatrix company={company} erpAppUrl={erpAppUrl} />
       ) : (
       <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
