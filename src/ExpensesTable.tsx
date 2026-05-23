@@ -55,6 +55,7 @@ export default function ExpensesTable({ company, year: defaultYear, erpAppUrl }:
   const [error, setError] = useState<string | null>(null);
   const [entries, setEntries] = useState<GLEntry[]>([]);
   const [expenseAccounts, setExpenseAccounts] = useState<Account[]>([]);
+  const [voucherSupplier, setVoucherSupplier] = useState<Map<string, string>>(new Map());
 
   useEffect(() => { setYear(defaultYear); }, [defaultYear]);
 
@@ -98,21 +99,45 @@ export default function ExpensesTable({ company, year: defaultYear, erpAppUrl }:
     ];
     if (company) filters.unshift(["company", "=", company]);
     try {
-      const data = await yapp.fetchList<GLEntry>("GL Entry", {
-        fields: [
-          "name", "posting_date", "account", "debit", "credit",
-          "voucher_type", "voucher_no", "party_type", "party", "remarks",
-        ],
-        filters,
-        limit_page_length: 5000,
-        order_by: "posting_date asc",
-      });
+      const piFilters: unknown[][] = [
+        ["posting_date", ">=", from],
+        ["posting_date", "<=", to],
+        ["docstatus", "=", 1],
+      ];
+      if (company) piFilters.unshift(["company", "=", company]);
+      const [data, piList] = await Promise.all([
+        yapp.fetchList<GLEntry>("GL Entry", {
+          fields: [
+            "name", "posting_date", "account", "debit", "credit",
+            "voucher_type", "voucher_no", "party_type", "party", "remarks",
+          ],
+          filters,
+          limit_page_length: 5000,
+          order_by: "posting_date asc",
+        }),
+        yapp.fetchList<{ name: string; supplier_name: string }>("Purchase Invoice", {
+          fields: ["name", "supplier_name"],
+          filters: piFilters,
+          limit_page_length: 2000,
+        }),
+      ]);
       setEntries(data);
+      const map = new Map<string, string>();
+      for (const pi of piList) map.set(pi.name, pi.supplier_name);
+      setVoucherSupplier(map);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Onbekende fout bij ophalen");
     } finally {
       setLoading(false);
     }
+  }
+
+  function resolveParty(e: GLEntry): string {
+    if (e.party) return e.party;
+    if (e.voucher_type === "Purchase Invoice") {
+      return voucherSupplier.get(e.voucher_no) ?? "";
+    }
+    return "";
   }
 
   useEffect(() => { load(); }, [company, year, month, accountFilter, expenseAccounts.length]);
@@ -134,7 +159,7 @@ export default function ExpensesTable({ company, year: defaultYear, erpAppUrl }:
     let arr = entries;
     if (q) {
       arr = arr.filter((e) =>
-        (e.party ?? "").toLowerCase().includes(q) ||
+        resolveParty(e).toLowerCase().includes(q) ||
         (e.remarks ?? "").toLowerCase().includes(q) ||
         e.voucher_no.toLowerCase().includes(q) ||
         e.account.toLowerCase().includes(q),
@@ -145,14 +170,14 @@ export default function ExpensesTable({ company, year: defaultYear, erpAppUrl }:
       switch (sortKey) {
         case "amount": cmp = a.debit - b.debit; break;
         case "account": cmp = a.account.localeCompare(b.account); break;
-        case "party": cmp = (a.party ?? "").localeCompare(b.party ?? ""); break;
+        case "party": cmp = resolveParty(a).localeCompare(resolveParty(b)); break;
         case "date":
         default: cmp = a.posting_date.localeCompare(b.posting_date); break;
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
     return arr;
-  }, [entries, search, sortKey, sortDir]);
+  }, [entries, search, sortKey, sortDir, voucherSupplier]);
 
   const total = useMemo(() => filtered.reduce((s, e) => s + e.debit, 0), [filtered]);
 
@@ -282,7 +307,7 @@ export default function ExpensesTable({ company, year: defaultYear, erpAppUrl }:
               filtered.map((e) => (
                 <tr key={e.name} className="border-b border-slate-100 hover:bg-slate-50 align-top">
                   <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap">{e.posting_date}</td>
-                  <td className="px-3 py-1.5">{e.party ?? <span className="text-slate-400">—</span>}</td>
+                  <td className="px-3 py-1.5">{resolveParty(e) || <span className="text-slate-400">—</span>}</td>
                   <td className="px-3 py-1.5 text-slate-700">{accountLabel(e.account)}</td>
                   <td className="px-3 py-1.5">
                     <a

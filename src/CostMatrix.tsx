@@ -73,6 +73,7 @@ export default function CostMatrix({ company, erpAppUrl }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [expenseAccounts, setExpenseAccounts] = useState<Account[]>([]);
   const [entries, setEntries] = useState<GLEntry[]>([]);
+  const [voucherSupplier, setVoucherSupplier] = useState<Map<string, string>>(new Map());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   // Load expense accounts
@@ -110,21 +111,46 @@ export default function CostMatrix({ company, erpAppUrl }: Props) {
     ];
     if (company) filters.unshift(["company", "=", company]);
     try {
-      const data = await yapp.fetchList<GLEntry>("GL Entry", {
-        fields: [
-          "name", "posting_date", "account", "debit", "credit",
-          "voucher_type", "voucher_no", "party_type", "party", "remarks",
-        ],
-        filters,
-        limit_page_length: 10000,
-        order_by: "posting_date asc",
-      });
+      const piFilters: unknown[][] = [
+        ["posting_date", ">=", from],
+        ["posting_date", "<=", to],
+        ["docstatus", "=", 1],
+      ];
+      if (company) piFilters.unshift(["company", "=", company]);
+      const [data, piList] = await Promise.all([
+        yapp.fetchList<GLEntry>("GL Entry", {
+          fields: [
+            "name", "posting_date", "account", "debit", "credit",
+            "voucher_type", "voucher_no", "party_type", "party", "remarks",
+          ],
+          filters,
+          limit_page_length: 10000,
+          order_by: "posting_date asc",
+        }),
+        yapp.fetchList<{ name: string; supplier_name: string }>("Purchase Invoice", {
+          fields: ["name", "supplier_name"],
+          filters: piFilters,
+          limit_page_length: 5000,
+        }),
+      ]);
       setEntries(data);
+      const map = new Map<string, string>();
+      for (const pi of piList) map.set(pi.name, pi.supplier_name);
+      setVoucherSupplier(map);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Onbekende fout");
     } finally {
       setLoading(false);
     }
+  }
+
+  function resolveSupplier(e: GLEntry): string {
+    if (e.party && e.party_type === "Supplier") return e.party;
+    if (e.voucher_type === "Purchase Invoice") {
+      const s = voucherSupplier.get(e.voucher_no);
+      if (s) return s;
+    }
+    return "(zonder leverancier)";
   }
 
   useEffect(() => { load(); }, [year, company, expenseAccounts.length]);
@@ -150,7 +176,7 @@ export default function CostMatrix({ company, erpAppUrl }: Props) {
 
   function groupKey(e: GLEntry): string {
     if (groupMode === "account") return e.account;
-    return e.party && e.party_type === "Supplier" ? e.party : "(zonder leverancier)";
+    return resolveSupplier(e);
   }
 
   function groupLabel(key: string): string {
@@ -190,7 +216,7 @@ export default function CostMatrix({ company, erpAppUrl }: Props) {
     );
     const grandTotal = monthTotals.reduce((s, v) => s + v, 0);
     return { rows: arr, monthTotals, grandTotal, entriesByGroup: entryMap };
-  }, [entries, groupMode]);
+  }, [entries, groupMode, voucherSupplier]);
 
   const visibleRows = hideEmpty ? rows.filter((r) => r.total > 0) : rows;
 
@@ -332,7 +358,7 @@ export default function CostMatrix({ company, erpAppUrl }: Props) {
                                 <td className="py-1 text-slate-500">{it.posting_date}</td>
                                 <td className="py-1 text-slate-600">
                                   {groupMode === "account"
-                                    ? (it.party || "-")
+                                    ? (resolveSupplier(it) === "(zonder leverancier)" ? "-" : resolveSupplier(it))
                                     : accountLabel(it.account)}
                                 </td>
                                 <td className="py-1">
