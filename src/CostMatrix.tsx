@@ -328,6 +328,7 @@ export default function CostMatrix({ company, year, erpAppUrl }: Props) {
               <th className="w-6 px-1 py-2"></th>
               <th
                 onClick={() => setSortKey("label")}
+                aria-sort={sortKey === "label" ? "ascending" : "none"}
                 className="text-left px-3 py-2 font-semibold text-slate-600 min-w-[200px] cursor-pointer select-none hover:bg-slate-100"
                 title="Sorteer alfanumeriek"
               >
@@ -341,6 +342,7 @@ export default function CostMatrix({ company, year, erpAppUrl }: Props) {
               ))}
               <th
                 onClick={() => setSortKey("total")}
+                aria-sort={sortKey === "total" ? "descending" : "none"}
                 className="text-right px-3 py-2 font-semibold text-slate-700 whitespace-nowrap cursor-pointer select-none hover:bg-slate-100"
                 title="Sorteer op bedrag (hoog → laag)"
               >
