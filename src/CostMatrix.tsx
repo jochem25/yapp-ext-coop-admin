@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { RefreshCw, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
+import { RefreshCw, ChevronDown, ChevronRight, ExternalLink, ArrowUp, ArrowDown } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 
 /**
@@ -30,6 +30,7 @@ interface GLEntry {
 }
 
 type GroupMode = "account" | "supplier";
+type SortKey = "label" | "total";
 
 const MONTHS_NL_SHORT = [
   "Jan", "Feb", "Mrt", "Apr", "Mei", "Jun",
@@ -65,6 +66,7 @@ interface Props {
 export default function CostMatrix({ company, year, erpAppUrl }: Props) {
   const [groupMode, setGroupMode] = useState<GroupMode>("account");
   const [hideEmpty, setHideEmpty] = useState<boolean>(true);
+  const [sortKey, setSortKey] = useState<SortKey>("total");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expenseAccounts, setExpenseAccounts] = useState<Account[]>([]);
@@ -163,6 +165,29 @@ export default function CostMatrix({ company, year, erpAppUrl }: Props) {
     return m;
   }, [expenseAccounts]);
 
+  // Canonical key per LOGISCHE grootboek: account_number > nl > account_name.
+  // Voorkomt dat dezelfde 4505 over meerdere companies als losse rijen verschijnt.
+  function canonicalAccountKey(accountName: string): string {
+    const meta = accountMeta.get(accountName);
+    if (!meta) return accountName;
+    return meta.number || meta.nl || meta.name;
+  }
+
+  const canonicalAccountLabels = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of expenseAccounts) {
+      const key = a.account_number || a.custom_account_nl || a.account_name;
+      if (m.has(key)) continue;
+      const label = a.custom_account_nl
+        ? a.custom_account_nl
+        : a.account_number
+          ? `${a.account_number} ${a.account_name}`
+          : a.account_name;
+      m.set(key, label);
+    }
+    return m;
+  }, [expenseAccounts]);
+
   function accountLabel(account: string): string {
     const meta = accountMeta.get(account);
     if (!meta) return account;
@@ -171,12 +196,12 @@ export default function CostMatrix({ company, year, erpAppUrl }: Props) {
   }
 
   function groupKey(e: GLEntry): string {
-    if (groupMode === "account") return e.account;
+    if (groupMode === "account") return canonicalAccountKey(e.account);
     return resolveSupplier(e);
   }
 
   function groupLabel(key: string): string {
-    if (groupMode === "account") return accountLabel(key);
+    if (groupMode === "account") return canonicalAccountLabels.get(key) ?? key;
     return key;
   }
 
@@ -206,15 +231,26 @@ export default function CostMatrix({ company, year, erpAppUrl }: Props) {
       months,
       total: months.reduce((s, v) => s + v, 0),
     }));
-    arr.sort((a, b) => b.total - a.total);
     const monthTotals = Array.from({ length: 12 }, (_, i) =>
       arr.reduce((s, r) => s + r.months[i], 0),
     );
     const grandTotal = monthTotals.reduce((s, v) => s + v, 0);
     return { rows: arr, monthTotals, grandTotal, entriesByGroup: entryMap };
-  }, [entries, groupMode, voucherSupplier]);
+  }, [entries, groupMode, voucherSupplier, accountMeta]);
 
-  const visibleRows = hideEmpty ? rows.filter((r) => r.total > 0) : rows;
+  const sortedRows = useMemo(() => {
+    const copy = rows.slice();
+    if (sortKey === "label") {
+      copy.sort((a, b) =>
+        groupLabel(a.key).localeCompare(groupLabel(b.key), "nl", { numeric: true, sensitivity: "base" }),
+      );
+    } else {
+      copy.sort((a, b) => b.total - a.total);
+    }
+    return copy;
+  }, [rows, sortKey, canonicalAccountLabels, groupMode]);
+
+  const visibleRows = hideEmpty ? sortedRows.filter((r) => r.total > 0) : sortedRows;
 
   function toggle(key: string): void {
     setExpanded((prev) => {
@@ -290,13 +326,29 @@ export default function CostMatrix({ company, year, erpAppUrl }: Props) {
           <thead className="bg-slate-50 border-b border-slate-200 sticky top-0">
             <tr>
               <th className="w-6 px-1 py-2"></th>
-              <th className="text-left px-3 py-2 font-semibold text-slate-600 min-w-[200px]">
-                {groupMode === "account" ? "Grootboek" : "Leverancier"}
+              <th
+                onClick={() => setSortKey("label")}
+                className="text-left px-3 py-2 font-semibold text-slate-600 min-w-[200px] cursor-pointer select-none hover:bg-slate-100"
+                title="Sorteer alfanumeriek"
+              >
+                <span className="inline-flex items-center gap-1">
+                  {groupMode === "account" ? "Grootboek" : "Leverancier"}
+                  {sortKey === "label" && <ArrowUp size={12} className="text-teal-600" />}
+                </span>
               </th>
               {MONTHS_NL_SHORT.map((m, i) => (
                 <th key={i} className="text-right px-2 py-2 font-semibold text-slate-600 whitespace-nowrap">{m}</th>
               ))}
-              <th className="text-right px-3 py-2 font-semibold text-slate-700 whitespace-nowrap">Totaal</th>
+              <th
+                onClick={() => setSortKey("total")}
+                className="text-right px-3 py-2 font-semibold text-slate-700 whitespace-nowrap cursor-pointer select-none hover:bg-slate-100"
+                title="Sorteer op bedrag (hoog → laag)"
+              >
+                <span className="inline-flex items-center gap-1 justify-end">
+                  {sortKey === "total" && <ArrowDown size={12} className="text-teal-600" />}
+                  Totaal
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody>
