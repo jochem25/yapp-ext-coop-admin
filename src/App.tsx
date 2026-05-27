@@ -605,6 +605,13 @@ function filterRows<T>(rows: T[], q: string): T[] {
   );
 }
 
+function sumField<T>(rows: T[], field: string): number {
+  return rows.reduce((s, r) => {
+    const v = (r as Record<string, unknown>)[field];
+    return typeof v === "number" ? s + v : s;
+  }, 0);
+}
+
 interface SortHeaderProps {
   field: string;
   label: string;
@@ -753,6 +760,17 @@ function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onToggle
               </tr>
             ))}
           </tbody>
+          {visible.length > 0 && (
+            <tfoot>
+              <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
+                <td colSpan={3} className="px-4 py-2 text-xs uppercase tracking-wide text-slate-600">
+                  Totaal · {visible.length} {visible.length === 1 ? "rij" : "rijen"}
+                </td>
+                <td className="px-4 py-2 text-right text-purple-700">{fmtEur(sumField(visible, "unallocated_amount"))}</td>
+                <td />
+              </tr>
+            </tfoot>
+          )}
         </table>
       </>
     );
@@ -793,6 +811,23 @@ function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onToggle
               </tr>
             ))}
           </tbody>
+          {visible.length > 0 && (() => {
+            const totalSigned = sumField(visible, "signed");
+            return (
+              <tfoot>
+                <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
+                  <td colSpan={3} className="px-4 py-2 text-xs uppercase tracking-wide text-slate-600">
+                    Totaal · {visible.length} {visible.length === 1 ? "rij" : "rijen"}
+                  </td>
+                  <td className={`px-4 py-2 text-right ${totalSigned < 0 ? "text-red-600" : "text-emerald-600"}`}>
+                    {totalSigned < 0 ? "− " : "+ "}{fmtEur(Math.abs(totalSigned))}
+                  </td>
+                  <td className="px-4 py-2 text-right text-indigo-700">{fmtEur(sumField(visible, "unallocated_amount"))}</td>
+                  <td />
+                </tr>
+              </tfoot>
+            );
+          })()}
         </table>
       </>
     );
@@ -834,6 +869,21 @@ function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onToggle
               </tr>
             ))}
           </tbody>
+          {visible.length > 0 && (() => {
+            const totalOutstanding = sumField(visible, "outstanding_amount");
+            return (
+              <tfoot>
+                <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
+                  <td colSpan={3} className="px-4 py-2 text-xs uppercase tracking-wide text-slate-600">
+                    Totaal · {visible.length} {visible.length === 1 ? "rij" : "rijen"}
+                  </td>
+                  <td className="px-4 py-2 text-right text-slate-700">{fmtEur(sumField(visible, "grand_total"))}</td>
+                  <td className={`px-4 py-2 text-right ${totalOutstanding < 0 ? "text-pink-600" : "text-amber-700"}`}>{fmtEur(totalOutstanding)}</td>
+                  <td />
+                </tr>
+              </tfoot>
+            );
+          })()}
         </table>
       </>
     );
@@ -915,6 +965,21 @@ function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onToggle
             );
           })}
         </tbody>
+        {visible.length > 0 && (
+          <tfoot>
+            <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
+              {showSelect && <td />}
+              <td colSpan={4} className="px-4 py-2 text-xs uppercase tracking-wide text-slate-600">
+                Totaal · {visible.length} {visible.length === 1 ? "rij" : "rijen"}
+              </td>
+              <td className="px-4 py-2 text-right text-slate-700">{fmtEur(sumField(visible, "grand_total"))}</td>
+              {kind === "pi_open" && (
+                <td className="px-4 py-2 text-right text-red-700">{fmtEur(sumField(visible, "outstanding_amount"))}</td>
+              )}
+              <td />
+            </tr>
+          </tfoot>
+        )}
       </table>
     </>
   );
