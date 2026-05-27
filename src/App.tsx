@@ -16,6 +16,7 @@ import {
   Landmark,
   Send,
   Coins,
+  Truck,
   Table2,
   Briefcase,
   Users,
@@ -25,6 +26,7 @@ import LedgerChart from "./LedgerChart";
 import ExpensesTable from "./ExpensesTable";
 import PaymentBatch, { type BatchInvoice } from "./PaymentBatch";
 import IntercompanyPanel from "./IntercompanyPanel";
+import ExternalCreditorsPanel from "./ExternalCreditorsPanel";
 import CostMatrix from "./CostMatrix";
 import ProjectsPanel from "./ProjectsPanel";
 import PersoneelPanel from "./PersoneelPanel";
@@ -195,7 +197,7 @@ export default function App() {
   const [piWithFile, setPiWithFile] = useState<Set<string>>(new Set());
 
   const [drill, setDrill] = useState<DrillKey | null>(null);
-  const [tab, setTab] = useState<"overview" | "ledger" | "expenses" | "winstuitkering" | "kostenmatrix" | "projecten" | "personeel">("overview");
+  const [tab, setTab] = useState<"overview" | "ledger" | "expenses" | "tebetalen" | "crediteuren" | "kostenmatrix" | "projecten" | "personeel">("overview");
 
   const [paidInBatch, setPaidInBatch] = useState<Set<string>>(() => loadPaidSet());
   const [selectedPis, setSelectedPis] = useState<Set<string>>(new Set());
@@ -449,12 +451,20 @@ export default function App() {
           <Receipt size={14} /> Uitgaven
         </button>
         <button
-          onClick={() => setTab("winstuitkering")}
+          onClick={() => setTab("tebetalen")}
           className={`flex items-center gap-2 px-4 py-1.5 text-sm rounded-md transition ${
-            tab === "winstuitkering" ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"
+            tab === "tebetalen" ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"
           }`}
         >
-          <Coins size={14} /> Winstuitkering
+          <Coins size={14} /> Te betalen
+        </button>
+        <button
+          onClick={() => setTab("crediteuren")}
+          className={`flex items-center gap-2 px-4 py-1.5 text-sm rounded-md transition ${
+            tab === "crediteuren" ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"
+          }`}
+        >
+          <Truck size={14} /> Crediteuren
         </button>
         <button
           onClick={() => setTab("kostenmatrix")}
@@ -486,8 +496,10 @@ export default function App() {
         <LedgerChart company={company} year={year} />
       ) : tab === "expenses" ? (
         <ExpensesTable company={company} year={year} erpAppUrl={erpAppUrl} />
-      ) : tab === "winstuitkering" ? (
+      ) : tab === "tebetalen" ? (
         <IntercompanyPanel company={company} year={year} erpAppUrl={erpAppUrl} inclBTW={inclBTW} />
+      ) : tab === "crediteuren" ? (
+        <ExternalCreditorsPanel company={company} erpAppUrl={erpAppUrl} inclBTW={inclBTW} />
       ) : tab === "kostenmatrix" ? (
         <CostMatrix company={company} year={year} erpAppUrl={erpAppUrl} />
       ) : tab === "projecten" ? (

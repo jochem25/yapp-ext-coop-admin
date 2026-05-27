@@ -3,7 +3,7 @@ import { RefreshCw, ChevronDown, ChevronRight, ExternalLink, Info } from "lucide
 import { yapp } from "./yapp-bridge";
 
 /**
- * Winstuitkering-overzicht.
+ * Te betalen — intercompany-overzicht.
  *
  * 3BM Coöperatie U.A. ontvangt 80%-facturen van de werkmaatschappijen
  * (3BM Bouwkunde, 3BM Engineering, 3BM bouwtechniek). 20% blijft bij
@@ -295,7 +295,7 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
     <div>
       <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h3 className="text-lg font-semibold text-slate-800">Winstuitkering — 20% restant per entiteit</h3>
+          <h3 className="text-lg font-semibold text-slate-800">Te betalen — intercompany 20% restant per entiteit</h3>
           <p className="text-xs text-slate-500 mt-0.5">
             80%-facturen van entiteiten aan {COOP_COMPANY}. 20% blijft als liquiditeit, wordt het jaar erop uitgekeerd.
           </p>
