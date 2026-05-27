@@ -35,6 +35,7 @@ interface SI {
   customer_name: string;
   project: string | null;
   grand_total: number;
+  net_total: number;
   is_return: number;
   status: string;
 }
@@ -89,13 +90,14 @@ function classify(coopOut: number, totalInput: number, isOverhead: boolean): Slu
 interface Props {
   company: string;
   erpAppUrl: string;
+  inclBTW: boolean;
 }
 
 type FilterMode = "all" | "niet_sluitend" | "input_hoger" | "input_lager" | "alleen_overhead";
 
 const SLUIT_ORDER: Record<Sluit, number> = { NEE: 0, BIJNA: 1, NVT: 2, JA: 3 };
 
-export default function ProjectsPanel({ company, erpAppUrl }: Props) {
+export default function ProjectsPanel({ company, erpAppUrl, inclBTW }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [coopSis, setCoopSis] = useState<SI[]>([]);
@@ -113,7 +115,7 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
     try {
       const fields = [
         "name", "company", "posting_date", "customer", "customer_name",
-        "project", "grand_total", "is_return", "status",
+        "project", "grand_total", "net_total", "is_return", "status",
       ];
       const [coop, entity] = await Promise.all([
         yapp.fetchList<SI>("Sales Invoice", {
@@ -174,19 +176,20 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
       }
       return r;
     };
+    const amt = (s: SI): number => inclBTW ? s.grand_total : s.net_total;
     for (const s of coopSis) {
       const k = projectKey(s);
       const r = ensure(k);
-      r.coopOutput += s.grand_total;
+      r.coopOutput += amt(s);
       if (s.customer_name) customerNames.get(k)!.add(s.customer_name);
     }
     for (const s of entitySis) {
       const k = projectKey(s);
       const r = ensure(k);
       switch (s.company) {
-        case E_BOUWKUNDE: r.bouwkundeInput += s.grand_total; break;
-        case E_BOUWTECHNIEK: r.bouwtechniekInput += s.grand_total; break;
-        case E_ENGINEERING: r.engineeringInput += s.grand_total; break;
+        case E_BOUWKUNDE: r.bouwkundeInput += amt(s); break;
+        case E_BOUWTECHNIEK: r.bouwtechniekInput += amt(s); break;
+        case E_ENGINEERING: r.engineeringInput += amt(s); break;
       }
     }
     for (const r of map.values()) {
@@ -200,7 +203,7 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
       r.searchBlob = `${r.project} ${customers} ${r.sluit}`.toLowerCase();
     }
     return Array.from(map.values());
-  }, [coopSis, entitySis]);
+  }, [coopSis, entitySis, inclBTW]);
 
   const semanticFiltered = useMemo(() => {
     switch (filter) {
@@ -291,7 +294,7 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
           <h3 className="text-lg font-semibold text-slate-800">Projecten — 80%-doorbelasting check</h3>
           <p className="text-xs text-slate-500 mt-0.5">
             Coöp output (klant) versus entiteit input (Coöp): controleert of entiteiten 80% van klantfactuur hebben doorbelast.
-            Cumulatief, incl BTW (grand_total), alle jaren.
+            Cumulatief, {inclBTW ? "incl BTW (grand_total)" : "excl BTW (net_total)"}, alle jaren.
           </p>
         </div>
         <button
@@ -424,7 +427,7 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
                               <th className="text-left py-1">Company</th>
                               <th className="text-left py-1">→ Klant</th>
                               <th className="text-left py-1">SI</th>
-                              <th className="text-right py-1">Incl BTW</th>
+                              <th className="text-right py-1">{inclBTW ? "Incl BTW" : "Excl BTW"}</th>
                               <th className="text-left py-1">Status</th>
                             </tr>
                           </thead>
@@ -448,7 +451,7 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
                                     </a>
                                     {s.is_return ? <span className="ml-1 px-1 text-[9px] bg-red-100 text-red-700 rounded">retour</span> : null}
                                   </td>
-                                  <td className={`py-1 text-right tabular-nums ${s.grand_total < 0 ? "text-red-700" : ""}`}>{fmtEur(s.grand_total)}</td>
+                                  <td className={`py-1 text-right tabular-nums ${(inclBTW ? s.grand_total : s.net_total) < 0 ? "text-red-700" : ""}`}>{fmtEur(inclBTW ? s.grand_total : s.net_total)}</td>
                                   <td className="py-1 text-slate-500 text-[10px]">{s.status}</td>
                                 </tr>
                               );
@@ -495,7 +498,7 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
         </div>
         <div>
           <strong className="text-slate-700">Bron:</strong> Coöp SI's naar externe klanten + entiteit SI's naar Coöp.
-          Bedragen incl BTW (grand_total). Cumulatief, alle jaren. Project "0000" = overhead (geen 80%-check).
+          Bedragen {inclBTW ? "incl BTW (grand_total)" : "excl BTW (net_total)"}. Cumulatief, alle jaren. Project "0000" = overhead (geen 80%-check).
           Retouren (is_return) tellen mee als negatief.
         </div>
       </div>

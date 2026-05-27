@@ -65,6 +65,9 @@ interface Props {
   company: string;
   year: number;
   erpAppUrl: string;
+  // BTW-toggle wordt door App.tsx doorgegeven maar genegeerd hier:
+  // de 80%-doorbelasting is per definitie op net_total (exclusief BTW).
+  inclBTW?: boolean;
 }
 
 interface EntityStats {

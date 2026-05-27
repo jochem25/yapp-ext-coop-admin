@@ -55,6 +55,7 @@ interface SalesInvoice {
   due_date: string;
   customer_name: string;
   grand_total: number;
+  net_total: number;
   outstanding_amount: number;
   status: string;
   docstatus: number;
@@ -67,6 +68,7 @@ interface PurchaseInvoice {
   supplier: string;
   bill_no: string;
   grand_total: number;
+  net_total: number;
   outstanding_amount: number;
   status: string;
   docstatus: number;
@@ -177,8 +179,10 @@ function StatCard({ label, count, amount, icon, tone, active, onClick }: CardPro
 
 export default function App() {
   const storedCompany = localStorage.getItem("coop_admin_company");
+  const storedInclBTW = localStorage.getItem("coop_admin_incl_btw");
   const [company, setCompany] = useState<string>(storedCompany ?? DEFAULT_COMPANY);
   const [year, setYear] = useState<number>(thisYear());
+  const [inclBTW, setInclBTW] = useState<boolean>(storedInclBTW === "1");
   const [companies, setCompanies] = useState<Company[]>([]);
   const [erpAppUrl, setErpAppUrl] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -229,6 +233,10 @@ export default function App() {
     localStorage.setItem("coop_admin_company", company);
   }, [company]);
 
+  useEffect(() => {
+    localStorage.setItem("coop_admin_incl_btw", inclBTW ? "1" : "0");
+  }, [inclBTW]);
+
   // Load companies + erpnext url once
   useEffect(() => {
     yapp.getErpNextAppUrl()
@@ -264,7 +272,7 @@ export default function App() {
         yapp.fetchList<SalesInvoice>("Sales Invoice", {
           fields: [
             "name", "posting_date", "due_date", "customer_name",
-            "grand_total", "outstanding_amount", "status", "docstatus",
+            "grand_total", "net_total", "outstanding_amount", "status", "docstatus",
           ],
           filters: baseFilters,
           limit_page_length: 1000,
@@ -273,7 +281,7 @@ export default function App() {
         yapp.fetchList<PurchaseInvoice>("Purchase Invoice", {
           fields: [
             "name", "posting_date", "supplier_name", "supplier", "bill_no",
-            "grand_total", "outstanding_amount", "status", "docstatus",
+            "grand_total", "net_total", "outstanding_amount", "status", "docstatus",
           ],
           filters: baseFilters,
           limit_page_length: 1000,
@@ -318,6 +326,7 @@ export default function App() {
   useEffect(() => { loadAll(); }, [company, year]);
 
   const stats = useMemo(() => {
+    const totalField = inclBTW ? "grand_total" : "net_total";
     const siOpen = si.filter((x) => x.docstatus === 1 && x.outstanding_amount > 0);
     const siDraft = si.filter((x) => x.docstatus === 0);
     const siReturnsOpen = si.filter((x) => x.outstanding_amount < 0);
@@ -327,16 +336,18 @@ export default function App() {
     );
     const peUnalloc = pe.filter((x) => Math.abs(x.unallocated_amount) > 0.01);
     const btUnrec = bt.filter((x) => x.docstatus === 1 && x.unallocated_amount > 0.01);
+    const sumTotal = <T extends SalesInvoice | PurchaseInvoice>(arr: T[]) =>
+      arr.reduce((s, x) => s + ((x as unknown as Record<string, number>)[totalField] ?? 0), 0);
     return {
       si_open: { items: siOpen, count: siOpen.length, amount: siOpen.reduce((s, x) => s + x.outstanding_amount, 0) },
-      si_draft: { items: siDraft, count: siDraft.length, amount: siDraft.reduce((s, x) => s + x.grand_total, 0) },
+      si_draft: { items: siDraft, count: siDraft.length, amount: sumTotal(siDraft) },
       si_returns_open: { items: siReturnsOpen, count: siReturnsOpen.length, amount: siReturnsOpen.reduce((s, x) => s + x.outstanding_amount, 0) },
       pi_open: { items: piOpen, count: piOpen.length, amount: piOpen.reduce((s, x) => s + x.outstanding_amount, 0) },
-      pi_no_pdf: { items: piNoPdf, count: piNoPdf.length, amount: piNoPdf.reduce((s, x) => s + x.grand_total, 0) },
+      pi_no_pdf: { items: piNoPdf, count: piNoPdf.length, amount: sumTotal(piNoPdf) },
       pe_unallocated: { items: peUnalloc, count: peUnalloc.length, amount: peUnalloc.reduce((s, x) => s + x.unallocated_amount, 0) },
       bt_unreconciled: { items: btUnrec, count: btUnrec.length, amount: btUnrec.reduce((s, x) => s + x.unallocated_amount, 0) },
     };
-  }, [si, pi, pe, bt, piWithFile]);
+  }, [si, pi, pe, bt, piWithFile, inclBTW]);
 
   const drillData = drill ? stats[drill] : null;
 
@@ -394,6 +405,22 @@ export default function App() {
             <option key={y} value={y}>{y}</option>
           ))}
         </select>
+        <label
+          className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none ml-2"
+          title="Schakel tussen netto bedragen (excl. BTW) en bruto (incl. BTW)"
+        >
+          <span className="relative inline-flex items-center">
+            <input
+              type="checkbox"
+              checked={inclBTW}
+              onChange={(e) => setInclBTW(e.target.checked)}
+              className="sr-only peer"
+            />
+            <span className="w-9 h-5 bg-slate-200 rounded-full peer-checked:bg-teal-600 transition-colors"></span>
+            <span className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
+          </span>
+          <span className="font-medium">{inclBTW ? "Incl. BTW" : "Excl. BTW"}</span>
+        </label>
       </div>
 
       <div className="mb-4 flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-1 w-fit">
@@ -460,11 +487,11 @@ export default function App() {
       ) : tab === "expenses" ? (
         <ExpensesTable company={company} year={year} erpAppUrl={erpAppUrl} />
       ) : tab === "winstuitkering" ? (
-        <IntercompanyPanel company={company} year={year} erpAppUrl={erpAppUrl} />
+        <IntercompanyPanel company={company} year={year} erpAppUrl={erpAppUrl} inclBTW={inclBTW} />
       ) : tab === "kostenmatrix" ? (
         <CostMatrix company={company} year={year} erpAppUrl={erpAppUrl} />
       ) : tab === "projecten" ? (
-        <ProjectsPanel company={company} erpAppUrl={erpAppUrl} />
+        <ProjectsPanel company={company} erpAppUrl={erpAppUrl} inclBTW={inclBTW} />
       ) : tab === "personeel" ? (
         <PersoneelPanel year={year} erpAppUrl={erpAppUrl} />
       ) : (
@@ -534,6 +561,7 @@ export default function App() {
               kind={drill}
               items={drillData.items as Array<SalesInvoice | PurchaseInvoice | PaymentEntry | BankTransaction>}
               erpAppUrl={erpAppUrl}
+              inclBTW={inclBTW}
               selectedPis={selectedPis}
               paidInBatch={paidInBatch}
               onTogglePi={togglePi}
@@ -576,13 +604,16 @@ interface DrillTableProps {
   kind: DrillKey;
   items: Array<SalesInvoice | PurchaseInvoice | PaymentEntry | BankTransaction>;
   erpAppUrl: string;
+  inclBTW: boolean;
   selectedPis?: Set<string>;
   paidInBatch?: Set<string>;
   onTogglePi?: (name: string) => void;
   onClearPaid?: (name: string) => void;
 }
 
-function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onTogglePi, onClearPaid }: DrillTableProps) {
+function DrillTable({ kind, items, erpAppUrl, inclBTW, selectedPis, paidInBatch, onTogglePi, onClearPaid }: DrillTableProps) {
+  const totalField = inclBTW ? "grand_total" : "net_total";
+  const totalLabel = inclBTW ? "Totaal incl" : "Totaal excl";
   const [sort, setSort] = useState<SortState | null>(null);
   const [search, setSearch] = useState("");
 
@@ -732,7 +763,7 @@ function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onToggle
               <SortHeader field="posting_date" label="Datum" sort={sort} onSort={setSort} />
               <SortHeader field="customer_name" label="Klant" sort={sort} onSort={setSort} />
               <SortHeader field="name" label="Factuur" sort={sort} onSort={setSort} />
-              <SortHeader field="grand_total" label="Totaal" align="right" sort={sort} onSort={setSort} />
+              <SortHeader field={totalField} label={totalLabel} align="right" sort={sort} onSort={setSort} />
               <SortHeader field="outstanding_amount" label="Openstaand" align="right" sort={sort} onSort={setSort} />
               <SortHeader field="status" label="Status" sort={sort} onSort={setSort} />
             </tr>
@@ -747,7 +778,7 @@ function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onToggle
                     {r.name} <ExternalLink size={10} />
                   </a>
                 </td>
-                <td className="px-4 py-2 text-right text-slate-700">{fmtEur(r.grand_total)}</td>
+                <td className="px-4 py-2 text-right text-slate-700">{fmtEur(inclBTW ? r.grand_total : r.net_total)}</td>
                 <td className={`px-4 py-2 text-right font-semibold ${r.outstanding_amount < 0 ? "text-pink-600" : "text-amber-700"}`}>{fmtEur(r.outstanding_amount)}</td>
                 <td className="px-4 py-2">
                   <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-700">{r.status}</span>
@@ -763,7 +794,7 @@ function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onToggle
                   <td colSpan={3} className="px-4 py-2 text-xs uppercase tracking-wide text-slate-600">
                     Totaal · {visible.length} {visible.length === 1 ? "rij" : "rijen"}
                   </td>
-                  <td className="px-4 py-2 text-right text-slate-700">{fmtEur(sumField(visible, "grand_total"))}</td>
+                  <td className="px-4 py-2 text-right text-slate-700">{fmtEur(sumField(visible, totalField))}</td>
                   <td className={`px-4 py-2 text-right ${totalOutstanding < 0 ? "text-pink-600" : "text-amber-700"}`}>{fmtEur(totalOutstanding)}</td>
                   <td />
                 </tr>
@@ -791,7 +822,7 @@ function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onToggle
             <SortHeader field="supplier_name" label="Leverancier" sort={sort} onSort={setSort} />
             <SortHeader field="bill_no" label="Factuurnr" sort={sort} onSort={setSort} />
             <SortHeader field="name" label="Factuur" sort={sort} onSort={setSort} />
-            <SortHeader field="grand_total" label="Totaal" align="right" sort={sort} onSort={setSort} />
+            <SortHeader field={totalField} label={totalLabel} align="right" sort={sort} onSort={setSort} />
             {kind === "pi_open" && (
               <SortHeader field="outstanding_amount" label="Openstaand" align="right" sort={sort} onSort={setSort} />
             )}
@@ -826,7 +857,7 @@ function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onToggle
                     {r.name} <ExternalLink size={10} />
                   </a>
                 </td>
-                <td className="px-4 py-2 text-right text-slate-700">{fmtEur(r.grand_total)}</td>
+                <td className="px-4 py-2 text-right text-slate-700">{fmtEur(inclBTW ? r.grand_total : r.net_total)}</td>
                 {kind === "pi_open" && (
                   <td className="px-4 py-2 text-right font-semibold text-red-700">{fmtEur(r.outstanding_amount)}</td>
                 )}
@@ -858,7 +889,7 @@ function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onToggle
               <td colSpan={4} className="px-4 py-2 text-xs uppercase tracking-wide text-slate-600">
                 Totaal · {visible.length} {visible.length === 1 ? "rij" : "rijen"}
               </td>
-              <td className="px-4 py-2 text-right text-slate-700">{fmtEur(sumField(visible, "grand_total"))}</td>
+              <td className="px-4 py-2 text-right text-slate-700">{fmtEur(sumField(visible, totalField))}</td>
               {kind === "pi_open" && (
                 <td className="px-4 py-2 text-right text-red-700">{fmtEur(sumField(visible, "outstanding_amount"))}</td>
               )}
