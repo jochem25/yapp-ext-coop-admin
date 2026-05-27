@@ -18,6 +18,7 @@ import {
   Coins,
   Table2,
   Briefcase,
+  Users,
 } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 import LedgerChart from "./LedgerChart";
@@ -26,6 +27,7 @@ import PaymentBatch, { type BatchInvoice } from "./PaymentBatch";
 import IntercompanyPanel from "./IntercompanyPanel";
 import CostMatrix from "./CostMatrix";
 import ProjectsPanel from "./ProjectsPanel";
+import PersoneelPanel from "./PersoneelPanel";
 
 const PAID_BATCH_KEY = "coop_admin_paid_in_batch";
 
@@ -188,7 +190,7 @@ export default function App() {
   const [piWithFile, setPiWithFile] = useState<Set<string>>(new Set());
 
   const [drill, setDrill] = useState<DrillKey | null>(null);
-  const [tab, setTab] = useState<"overview" | "ledger" | "expenses" | "winstuitkering" | "kostenmatrix" | "projecten">("overview");
+  const [tab, setTab] = useState<"overview" | "ledger" | "expenses" | "winstuitkering" | "kostenmatrix" | "projecten" | "personeel">("overview");
 
   const [paidInBatch, setPaidInBatch] = useState<Set<string>>(() => loadPaidSet());
   const [selectedPis, setSelectedPis] = useState<Set<string>>(new Set());
@@ -442,6 +444,14 @@ export default function App() {
         >
           <Briefcase size={14} /> Projecten
         </button>
+        <button
+          onClick={() => setTab("personeel")}
+          className={`flex items-center gap-2 px-4 py-1.5 text-sm rounded-md transition ${
+            tab === "personeel" ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"
+          }`}
+        >
+          <Users size={14} /> Personeel
+        </button>
       </div>
 
       {tab === "ledger" ? (
@@ -454,6 +464,8 @@ export default function App() {
         <CostMatrix company={company} year={year} erpAppUrl={erpAppUrl} />
       ) : tab === "projecten" ? (
         <ProjectsPanel company={company} erpAppUrl={erpAppUrl} />
+      ) : tab === "personeel" ? (
+        <PersoneelPanel company={company} year={year} erpAppUrl={erpAppUrl} />
       ) : (
       <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
