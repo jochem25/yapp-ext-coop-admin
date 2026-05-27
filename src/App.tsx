@@ -469,7 +469,7 @@ export default function App() {
       ) : tab === "projecten" ? (
         <ProjectsPanel company={company} erpAppUrl={erpAppUrl} />
       ) : tab === "personeel" ? (
-        <PersoneelPanel company={company} year={year} erpAppUrl={erpAppUrl} />
+        <PersoneelPanel year={year} erpAppUrl={erpAppUrl} />
       ) : (
       <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">

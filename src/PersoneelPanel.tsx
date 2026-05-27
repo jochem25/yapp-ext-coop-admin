@@ -25,7 +25,6 @@ interface Employee {
 }
 
 interface Props {
-  company: string;
   year: number;
   erpAppUrl: string;
 }
@@ -57,7 +56,7 @@ function inEmployment(emp: Employee, monthStart: string, monthEnd: string): bool
   return true;
 }
 
-export default function PersoneelPanel({ company, year, erpAppUrl }: Props) {
+export default function PersoneelPanel({ year, erpAppUrl }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -67,14 +66,12 @@ export default function PersoneelPanel({ company, year, erpAppUrl }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const filters: unknown[][] = [];
-      if (company) filters.push(["company", "=", company]);
       const list = await yapp.fetchList<Employee>("Employee", {
         fields: [
           "name", "employee_name", "company", "status",
           "date_of_joining", "relieving_date", "designation", "department",
         ],
-        filters,
+        filters: [],
         limit_page_length: 1000,
         order_by: "date_of_joining asc",
       });
@@ -86,7 +83,7 @@ export default function PersoneelPanel({ company, year, erpAppUrl }: Props) {
     }
   }
 
-  useEffect(() => { load(); }, [company]);
+  useEffect(() => { load(); }, []);
 
   // Kolommen: alle companies met minstens één employee in dit jaar
   const columns = useMemo(() => {
@@ -160,8 +157,7 @@ export default function PersoneelPanel({ company, year, erpAppUrl }: Props) {
 
       {columns.length === 0 && !loading && (
         <div className="px-5 py-8 text-center text-slate-400 text-sm">
-          Geen personeel gevonden voor {year}
-          {company ? ` bij ${company}` : ""}.
+          Geen personeel gevonden voor {year}.
         </div>
       )}
 
