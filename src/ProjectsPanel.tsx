@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { RefreshCw, ChevronDown, ChevronRight, ExternalLink, Info } from "lucide-react";
 import { yapp } from "./yapp-bridge";
+import { SortHeader, FilterBar, sortRows, type SortState } from "./table-helpers";
 
 /**
  * Projecten-overzicht: Coöp output (naar eindklant) vs entiteiten input (naar Coöp).
@@ -49,8 +50,11 @@ interface ProjectRow {
   totalInput: number;
   norm80: number;
   delta: number;               // totalInput − norm80
+  absDelta: number;            // |delta| voor sorteren op "verschil grootte"
   sluit: Sluit;
+  sluitOrder: number;          // 0=NEE, 1=BIJNA, 2=NVT, 3=JA voor sorteren
   isOverhead: boolean;
+  searchBlob: string;          // pre-computed lowercase search-target (project + alle customer_names)
 }
 
 function fmtEur(n: number): string {
@@ -88,7 +92,8 @@ interface Props {
 }
 
 type FilterMode = "all" | "niet_sluitend" | "input_hoger" | "input_lager" | "alleen_overhead";
-type SortKey = "project" | "coop" | "delta" | "status";
+
+const SLUIT_ORDER: Record<Sluit, number> = { NEE: 0, BIJNA: 1, NVT: 2, JA: 3 };
 
 export default function ProjectsPanel({ company, erpAppUrl }: Props) {
   const [loading, setLoading] = useState(false);
@@ -97,7 +102,8 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
   const [entitySis, setEntitySis] = useState<SI[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<FilterMode>("all");
-  const [sortKey, setSortKey] = useState<SortKey>("coop");
+  const [sort, setSort] = useState<SortState | null>({ field: "coopOutput", dir: "desc" });
+  const [search, setSearch] = useState("");
 
   const wrongCompany = company !== COOP_COMPANY && company !== "";
 
@@ -144,6 +150,7 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
 
   const projectRows = useMemo<ProjectRow[]>(() => {
     const map = new Map<string, ProjectRow>();
+    const customerNames = new Map<string, Set<string>>();  // project → set(customer_name)
     const ensure = (key: string): ProjectRow => {
       let r = map.get(key);
       if (!r) {
@@ -156,19 +163,26 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
           totalInput: 0,
           norm80: 0,
           delta: 0,
+          absDelta: 0,
           sluit: "JA",
+          sluitOrder: SLUIT_ORDER.JA,
           isOverhead: key === OVERHEAD_PROJECT,
+          searchBlob: "",
         };
         map.set(key, r);
+        customerNames.set(key, new Set());
       }
       return r;
     };
     for (const s of coopSis) {
-      const r = ensure(projectKey(s));
+      const k = projectKey(s);
+      const r = ensure(k);
       r.coopOutput += s.grand_total;
+      if (s.customer_name) customerNames.get(k)!.add(s.customer_name);
     }
     for (const s of entitySis) {
-      const r = ensure(projectKey(s));
+      const k = projectKey(s);
+      const r = ensure(k);
       switch (s.company) {
         case E_BOUWKUNDE: r.bouwkundeInput += s.grand_total; break;
         case E_BOUWTECHNIEK: r.bouwtechniekInput += s.grand_total; break;
@@ -179,41 +193,37 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
       r.totalInput = r.bouwkundeInput + r.bouwtechniekInput + r.engineeringInput;
       r.norm80 = r.coopOutput * 0.80;
       r.delta = r.totalInput - r.norm80;
+      r.absDelta = Math.abs(r.delta);
       r.sluit = classify(r.coopOutput, r.totalInput, r.isOverhead);
+      r.sluitOrder = SLUIT_ORDER[r.sluit];
+      const customers = Array.from(customerNames.get(r.project) ?? []).join(" ");
+      r.searchBlob = `${r.project} ${customers} ${r.sluit}`.toLowerCase();
     }
     return Array.from(map.values());
   }, [coopSis, entitySis]);
 
-  const filtered = useMemo(() => {
-    let arr = projectRows;
+  const semanticFiltered = useMemo(() => {
     switch (filter) {
       case "niet_sluitend":
-        arr = arr.filter((r) => r.sluit === "NEE" || r.sluit === "BIJNA");
-        break;
+        return projectRows.filter((r) => r.sluit === "NEE" || r.sluit === "BIJNA");
       case "input_hoger":
-        arr = arr.filter((r) => !r.isOverhead && r.delta > 1);
-        break;
+        return projectRows.filter((r) => !r.isOverhead && r.delta > 1);
       case "input_lager":
-        arr = arr.filter((r) => !r.isOverhead && r.delta < -1);
-        break;
+        return projectRows.filter((r) => !r.isOverhead && r.delta < -1);
       case "alleen_overhead":
-        arr = arr.filter((r) => r.isOverhead || r.project === NO_PROJECT_KEY);
-        break;
+        return projectRows.filter((r) => r.isOverhead || r.project === NO_PROJECT_KEY);
+      default:
+        return projectRows;
     }
-    const sorted = [...arr].sort((a, b) => {
-      switch (sortKey) {
-        case "project": return a.project.localeCompare(b.project);
-        case "delta": return Math.abs(b.delta) - Math.abs(a.delta);
-        case "status": {
-          const ord = (s: Sluit) => s === "NEE" ? 0 : s === "BIJNA" ? 1 : s === "NVT" ? 2 : 3;
-          return ord(a.sluit) - ord(b.sluit);
-        }
-        case "coop":
-        default: return b.coopOutput - a.coopOutput;
-      }
-    });
-    return sorted;
-  }, [projectRows, filter, sortKey]);
+  }, [projectRows, filter]);
+
+  const filtered = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    const searched = needle
+      ? semanticFiltered.filter((r) => r.searchBlob.includes(needle))
+      : semanticFiltered;
+    return sortRows(searched, sort);
+  }, [semanticFiltered, search, sort]);
 
   const totals = useMemo(() => filtered.reduce(
     (acc, r) => ({
@@ -325,39 +335,31 @@ export default function ProjectsPanel({ company, erpAppUrl }: Props) {
             {label}
           </button>
         ))}
-        <div className="ml-auto flex items-center gap-1 text-slate-500">
-          Sorteer:
-          {([
-            ["coop", "Output"],
-            ["delta", "|Verschil|"],
-            ["project", "Project"],
-            ["status", "Status"],
-          ] as const).map(([k, label]) => (
-            <button
-              key={k}
-              onClick={() => setSortKey(k)}
-              className={`px-2 py-1 rounded ${sortKey === k ? "bg-slate-200 text-slate-800" : "hover:bg-slate-100"}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-auto">
+        <FilterBar
+          search={search}
+          setSearch={setSearch}
+          hasSort={sort !== null}
+          resetSort={() => setSort(null)}
+          totalCount={semanticFiltered.length}
+          visibleCount={filtered.length}
+          placeholder="Filter op project, klant of status..."
+        />
         <table className="w-full text-sm">
           <thead className="bg-slate-50 border-b border-slate-200 sticky top-0">
             <tr>
               <th className="w-6 px-1 py-2"></th>
-              <th className="text-left px-3 py-2 font-semibold text-slate-600">Project</th>
-              <th className="text-right px-3 py-2 font-semibold text-slate-700">Coöp output</th>
-              <th className="text-right px-3 py-2 font-semibold text-slate-500">Bouwkunde</th>
-              <th className="text-right px-3 py-2 font-semibold text-slate-500">Bouwtechniek</th>
-              <th className="text-right px-3 py-2 font-semibold text-slate-500">Engineering</th>
-              <th className="text-right px-3 py-2 font-semibold text-slate-700">Som input</th>
-              <th className="text-right px-3 py-2 font-semibold text-slate-600">80% norm</th>
-              <th className="text-right px-3 py-2 font-semibold text-slate-700">Verschil</th>
-              <th className="text-left px-3 py-2 font-semibold text-slate-600">Status</th>
+              <SortHeader field="project" label="Project" sort={sort} onSort={setSort} className="px-3" />
+              <SortHeader field="coopOutput" label="Coöp output" align="right" sort={sort} onSort={setSort} className="px-3 text-slate-700" />
+              <SortHeader field="bouwkundeInput" label="Bouwkunde" align="right" sort={sort} onSort={setSort} className="px-3" />
+              <SortHeader field="bouwtechniekInput" label="Bouwtechniek" align="right" sort={sort} onSort={setSort} className="px-3" />
+              <SortHeader field="engineeringInput" label="Engineering" align="right" sort={sort} onSort={setSort} className="px-3" />
+              <SortHeader field="totalInput" label="Som input" align="right" sort={sort} onSort={setSort} className="px-3 text-slate-700" />
+              <SortHeader field="norm80" label="80% norm" align="right" sort={sort} onSort={setSort} className="px-3" />
+              <SortHeader field="absDelta" label="|Verschil|" align="right" sort={sort} onSort={setSort} className="px-3 text-slate-700" />
+              <SortHeader field="sluitOrder" label="Status" sort={sort} onSort={setSort} className="px-3" />
             </tr>
           </thead>
           <tbody>
