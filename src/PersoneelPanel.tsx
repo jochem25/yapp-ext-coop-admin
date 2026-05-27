@@ -22,7 +22,10 @@ interface Employee {
   relieving_date: string | null;
   designation: string | null;
   department: string | null;
+  employment_type: string | null;
 }
+
+const ZERO_HOURS_TYPE = "Nuluren contract";
 
 interface Props {
   year: number;
@@ -62,10 +65,15 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null); // key = `${month}-${company}`
   const [onlyActive, setOnlyActive] = useState(false);
+  const [hideZeroHours, setHideZeroHours] = useState(true);
 
   const visibleEmployees = useMemo(
-    () => onlyActive ? employees.filter((e) => e.status === "Active") : employees,
-    [employees, onlyActive],
+    () => employees.filter((e) => {
+      if (onlyActive && e.status !== "Active") return false;
+      if (hideZeroHours && e.employment_type === ZERO_HOURS_TYPE) return false;
+      return true;
+    }),
+    [employees, onlyActive, hideZeroHours],
   );
 
   async function load() {
@@ -76,6 +84,7 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
         fields: [
           "name", "employee_name", "company", "status",
           "date_of_joining", "relieving_date", "designation", "department",
+          "employment_type",
         ],
         filters: [],
         limit_page_length: 1000,
@@ -146,6 +155,19 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+            <span className="relative inline-flex items-center">
+              <input
+                type="checkbox"
+                checked={hideZeroHours}
+                onChange={(e) => setHideZeroHours(e.target.checked)}
+                className="sr-only peer"
+              />
+              <span className="w-9 h-5 bg-slate-200 rounded-full peer-checked:bg-teal-600 transition-colors"></span>
+              <span className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
+            </span>
+            Verberg 0-uren
+          </label>
           <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
             <span className="relative inline-flex items-center">
               <input
