@@ -61,6 +61,12 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null); // key = `${month}-${company}`
+  const [onlyActive, setOnlyActive] = useState(false);
+
+  const visibleEmployees = useMemo(
+    () => onlyActive ? employees.filter((e) => e.status === "Active") : employees,
+    [employees, onlyActive],
+  );
 
   async function load() {
     setLoading(true);
@@ -90,11 +96,11 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
     const yearStart = `${year}-01-01`;
     const yearEnd = `${year}-12-31`;
     const active = new Set<string>();
-    for (const e of employees) {
+    for (const e of visibleEmployees) {
       if (inEmployment(e, yearStart, yearEnd)) active.add(e.company);
     }
     return Array.from(active).sort();
-  }, [employees, year]);
+  }, [visibleEmployees, year]);
 
   // matrix[monthIdx][company] = Employee[]
   const matrix = useMemo(() => {
@@ -104,7 +110,7 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
       const monthEnd = ymd(year, m, lastDay(year, m));
       out[m] = {};
       for (const c of columns) out[m][c] = [];
-      for (const e of employees) {
+      for (const e of visibleEmployees) {
         if (!columns.includes(e.company)) continue;
         if (inEmployment(e, monthStart, monthEnd)) {
           out[m][e.company].push(e);
@@ -112,7 +118,7 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
       }
     }
     return out;
-  }, [employees, columns, year]);
+  }, [visibleEmployees, columns, year]);
 
   // Totaal per kolom = piek over de 12 maanden (max werknemers in een maand binnen jaar)
   const peakPerColumn = useMemo(() => {
@@ -139,14 +145,29 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
             Klik op een aantal om de namen uit te klappen
           </p>
         </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="flex items-center gap-2 px-3 py-1.5 bg-teal-600 text-white text-sm rounded-lg hover:bg-teal-700 disabled:opacity-50 cursor-pointer"
-        >
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-          Vernieuwen
-        </button>
+        <div className="flex items-center gap-3">
+          <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+            <span className="relative inline-flex items-center">
+              <input
+                type="checkbox"
+                checked={onlyActive}
+                onChange={(e) => setOnlyActive(e.target.checked)}
+                className="sr-only peer"
+              />
+              <span className="w-9 h-5 bg-slate-200 rounded-full peer-checked:bg-teal-600 transition-colors"></span>
+              <span className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
+            </span>
+            Alleen actieve
+          </label>
+          <button
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-2 px-3 py-1.5 bg-teal-600 text-white text-sm rounded-lg hover:bg-teal-700 disabled:opacity-50 cursor-pointer"
+          >
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+            Vernieuwen
+          </button>
+        </div>
       </div>
 
       {error && (
