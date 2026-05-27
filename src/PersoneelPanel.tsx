@@ -26,6 +26,30 @@ interface Employee {
 }
 
 const ZERO_HOURS_TYPE = "Nuluren contract";
+const COOP_COMPANY = "3BM Coöperatie U.A.";
+
+const COST_BASE_KEY = "coop_admin_personeel_cost_base";
+const COST_MARGINAL_KEY = "coop_admin_personeel_cost_marginal";
+const DEFAULT_BASE = 670;
+const DEFAULT_MARGINAL = 375;
+
+function loadCost(key: string, fallback: number): number {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const n = parseFloat(raw);
+    return Number.isFinite(n) ? n : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function fmtEur(n: number): string {
+  return `€ ${n.toLocaleString("nl-NL", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}`;
+}
 
 interface Props {
   year: number;
@@ -66,6 +90,11 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null); // key = `${month}-${company}`
   const [onlyActive, setOnlyActive] = useState(false);
   const [hideZeroHours, setHideZeroHours] = useState(true);
+  const [costBase, setCostBase] = useState<number>(() => loadCost(COST_BASE_KEY, DEFAULT_BASE));
+  const [costMarginal, setCostMarginal] = useState<number>(() => loadCost(COST_MARGINAL_KEY, DEFAULT_MARGINAL));
+
+  useEffect(() => { localStorage.setItem(COST_BASE_KEY, String(costBase)); }, [costBase]);
+  useEffect(() => { localStorage.setItem(COST_MARGINAL_KEY, String(costMarginal)); }, [costMarginal]);
 
   const visibleEmployees = useMemo(
     () => employees.filter((e) => {
@@ -140,6 +169,23 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
     return out;
   }, [matrix, columns]);
 
+  // Kosten/jaar per company op basis van piek-headcount.
+  // Coöp betaalt niks (0). Anders: base + max(piek - 1, 0) × marginal.
+  const costPerColumn = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const c of columns) {
+      if (c === COOP_COMPANY) { out[c] = 0; continue; }
+      const n = peakPerColumn[c] ?? 0;
+      out[c] = n === 0 ? 0 : costBase + Math.max(n - 1, 0) * costMarginal;
+    }
+    return out;
+  }, [columns, peakPerColumn, costBase, costMarginal]);
+
+  const costTotal = useMemo(
+    () => Object.values(costPerColumn).reduce((s, v) => s + v, 0),
+    [costPerColumn],
+  );
+
   const erpLink = (empName: string) =>
     erpAppUrl ? `${erpAppUrl}/app/employee/${encodeURIComponent(empName)}` : "#";
 
@@ -190,6 +236,37 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
             Vernieuwen
           </button>
         </div>
+      </div>
+
+      <div className="px-5 py-2 bg-white border-b border-slate-100 flex items-center gap-4 flex-wrap text-sm">
+        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Kosten/jaar per entiteit</span>
+        <label className="inline-flex items-center gap-2 text-slate-600">
+          Eerste medewerker/eigenaar
+          <span className="text-slate-400">€</span>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={costBase}
+            onChange={(e) => setCostBase(Number(e.target.value) || 0)}
+            className="w-20 px-2 py-1 border border-slate-200 rounded text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-teal-500"
+          />
+        </label>
+        <label className="inline-flex items-center gap-2 text-slate-600">
+          Volgende medewerker
+          <span className="text-slate-400">€</span>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={costMarginal}
+            onChange={(e) => setCostMarginal(Number(e.target.value) || 0)}
+            className="w-20 px-2 py-1 border border-slate-200 rounded text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-teal-500"
+          />
+        </label>
+        <span className="text-xs text-slate-400">
+          Formule: base + (piek − 1) × marginaal. Coöperatie betaalt niks.
+        </span>
       </div>
 
       {error && (
@@ -310,6 +387,15 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
                     columns.reduce((s, c) => s + matrix[m][c].length, 0)
                   ))}
                 </td>
+              </tr>
+              <tr className="bg-slate-50 font-semibold">
+                <td className="px-4 py-2 text-slate-600 text-xs uppercase tracking-wide">Kosten/jaar</td>
+                {columns.map((c) => (
+                  <td key={c} className="px-4 py-2 text-right tabular-nums text-slate-700">
+                    {c === COOP_COMPANY ? <span className="text-slate-300">—</span> : fmtEur(costPerColumn[c])}
+                  </td>
+                ))}
+                <td className="px-4 py-2 text-right tabular-nums text-teal-700">{fmtEur(costTotal)}</td>
               </tr>
             </tfoot>
           </table>
