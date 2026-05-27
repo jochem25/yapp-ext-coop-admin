@@ -19,6 +19,10 @@ import {
   Table2,
   Briefcase,
   Users,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
+  Search,
 } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 import LedgerChart from "./LedgerChart";
@@ -571,6 +575,111 @@ export default function App() {
   );
 }
 
+type SortDir = "asc" | "desc";
+interface SortState { field: string; dir: SortDir }
+
+function sortRows<T>(rows: T[], sort: SortState | null): T[] {
+  if (!sort) return rows;
+  const { field, dir } = sort;
+  return rows.slice().sort((a, b) => {
+    const av = (a as Record<string, unknown>)[field];
+    const bv = (b as Record<string, unknown>)[field];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === "number" && typeof bv === "number") {
+      return dir === "asc" ? av - bv : bv - av;
+    }
+    const cmp = String(av).localeCompare(String(bv), "nl", { numeric: true, sensitivity: "base" });
+    return dir === "asc" ? cmp : -cmp;
+  });
+}
+
+function filterRows<T>(rows: T[], q: string): T[] {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return rows;
+  return rows.filter((r) =>
+    Object.values(r as Record<string, unknown>).some((v) =>
+      v != null && typeof v !== "object" && String(v).toLowerCase().includes(needle)
+    )
+  );
+}
+
+interface SortHeaderProps {
+  field: string;
+  label: string;
+  align?: "left" | "right";
+  sort: SortState | null;
+  onSort: (s: SortState | null) => void;
+  className?: string;
+}
+
+function SortHeader({ field, label, align = "left", sort, onSort, className }: SortHeaderProps) {
+  const active = sort?.field === field;
+  const dir: SortDir | null = active ? sort!.dir : null;
+  const ariaSort: "ascending" | "descending" | "none" =
+    dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none";
+  const click = () => {
+    if (!active) onSort({ field, dir: "asc" });
+    else if (dir === "asc") onSort({ field, dir: "desc" });
+    else onSort(null);
+  };
+  return (
+    <th
+      onClick={click}
+      aria-sort={ariaSort}
+      className={`${align === "right" ? "text-right" : "text-left"} px-4 py-2 font-semibold text-slate-600 cursor-pointer select-none hover:bg-slate-100 ${className ?? ""}`}
+    >
+      <span className={`inline-flex items-center gap-1 ${align === "right" ? "w-full justify-end" : ""}`}>
+        {label}
+        {active ? (
+          dir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />
+        ) : (
+          <ChevronsUpDown size={12} className="opacity-30" />
+        )}
+      </span>
+    </th>
+  );
+}
+
+interface FilterBarProps {
+  search: string;
+  setSearch: (s: string) => void;
+  hasSort: boolean;
+  resetSort: () => void;
+  totalCount: number;
+  visibleCount: number;
+}
+
+function FilterBar({ search, setSearch, hasSort, resetSort, totalCount, visibleCount }: FilterBarProps) {
+  const hasSearch = search.trim().length > 0;
+  return (
+    <div className="px-4 py-2 bg-white border-b border-slate-100 flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-2 flex-1 min-w-[200px] max-w-md">
+        <Search size={14} className="text-slate-400 shrink-0" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Filter (datum, naam, factuurnr, status...)"
+          className="flex-1 text-sm px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-teal-500"
+        />
+      </div>
+      <div className="text-xs text-slate-500">
+        {hasSearch ? `${visibleCount} van ${totalCount}` : `${totalCount} ${totalCount === 1 ? "rij" : "rijen"}`}
+      </div>
+      {(hasSearch || hasSort) && (
+        <button
+          onClick={() => { setSearch(""); resetSort(); }}
+          className="text-xs text-slate-500 hover:text-slate-700 underline"
+        >
+          Reset
+        </button>
+      )}
+    </div>
+  );
+}
+
 interface DrillTableProps {
   kind: DrillKey;
   items: Array<SalesInvoice | PurchaseInvoice | PaymentEntry | BankTransaction>;
@@ -582,9 +691,11 @@ interface DrillTableProps {
 }
 
 function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onTogglePi, onClearPaid }: DrillTableProps) {
-  if (items.length === 0) {
-    return <div className="px-5 py-8 text-center text-slate-400">Geen items in deze categorie</div>;
-  }
+  const [sort, setSort] = useState<SortState | null>(null);
+  const [search, setSearch] = useState("");
+
+  // Reset sort/filter wanneer de drill-categorie wijzigt
+  useEffect(() => { setSort(null); setSearch(""); }, [kind]);
 
   const linkBase = erpAppUrl ? `${erpAppUrl}/app` : "";
   const docLink = (doctype: string, name: string) => {
@@ -592,62 +703,86 @@ function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onToggle
     return linkBase ? `${linkBase}/${slug}/${encodeURIComponent(name)}` : "#";
   };
 
+  if (items.length === 0) {
+    return <div className="px-5 py-8 text-center text-slate-400">Geen items in deze categorie</div>;
+  }
+
+  const filterBar = (visibleCount: number) => (
+    <FilterBar
+      search={search}
+      setSearch={setSearch}
+      hasSort={sort !== null}
+      resetSort={() => setSort(null)}
+      totalCount={items.length}
+      visibleCount={visibleCount}
+    />
+  );
+
+  const noMatchRow = (colSpan: number) => (
+    <tr><td colSpan={colSpan} className="px-4 py-6 text-center text-slate-400">Geen rijen matchen het filter</td></tr>
+  );
+
   if (kind === "pe_unallocated") {
-    const rows = items as PaymentEntry[];
+    const all = items as PaymentEntry[];
+    const visible = sortRows(filterRows(all, search), sort);
     return (
-      <table className="w-full text-sm">
-        <thead className="bg-slate-50 border-b border-slate-200">
-          <tr>
-            <th className="text-left px-4 py-2 font-semibold text-slate-600">Datum</th>
-            <th className="text-left px-4 py-2 font-semibold text-slate-600">Partij</th>
-            <th className="text-left px-4 py-2 font-semibold text-slate-600">Type</th>
-            <th className="text-right px-4 py-2 font-semibold text-slate-600">Niet gekoppeld</th>
-            <th className="text-left px-4 py-2 font-semibold text-slate-600">Actie</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.name} className="border-b border-slate-100 hover:bg-slate-50">
-              <td className="px-4 py-2 text-slate-500">{r.posting_date}</td>
-              <td className="px-4 py-2">{r.party}</td>
-              <td className="px-4 py-2">{r.payment_type}</td>
-              <td className="px-4 py-2 text-right font-semibold text-purple-700">{fmtEur(r.unallocated_amount)}</td>
-              <td className="px-4 py-2">
-                <a href={docLink("Payment Entry", r.name)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-teal-600 hover:underline">
-                  {r.name} <ExternalLink size={12} />
-                </a>
-              </td>
+      <>
+        {filterBar(visible.length)}
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <SortHeader field="posting_date" label="Datum" sort={sort} onSort={setSort} />
+              <SortHeader field="party" label="Partij" sort={sort} onSort={setSort} />
+              <SortHeader field="payment_type" label="Type" sort={sort} onSort={setSort} />
+              <SortHeader field="unallocated_amount" label="Niet gekoppeld" align="right" sort={sort} onSort={setSort} />
+              <SortHeader field="name" label="Actie" sort={sort} onSort={setSort} />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {visible.length === 0 ? noMatchRow(5) : visible.map((r) => (
+              <tr key={r.name} className="border-b border-slate-100 hover:bg-slate-50">
+                <td className="px-4 py-2 text-slate-500">{r.posting_date}</td>
+                <td className="px-4 py-2">{r.party}</td>
+                <td className="px-4 py-2">{r.payment_type}</td>
+                <td className="px-4 py-2 text-right font-semibold text-purple-700">{fmtEur(r.unallocated_amount)}</td>
+                <td className="px-4 py-2">
+                  <a href={docLink("Payment Entry", r.name)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-teal-600 hover:underline">
+                    {r.name} <ExternalLink size={12} />
+                  </a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </>
     );
   }
 
   if (kind === "bt_unreconciled") {
-    const rows = items as BankTransaction[];
+    const all = (items as BankTransaction[]).map((r) => ({ ...r, signed: r.deposit - r.withdrawal }));
+    const visible = sortRows(filterRows(all, search), sort);
     return (
-      <table className="w-full text-sm">
-        <thead className="bg-slate-50 border-b border-slate-200">
-          <tr>
-            <th className="text-left px-4 py-2 font-semibold text-slate-600">Datum</th>
-            <th className="text-left px-4 py-2 font-semibold text-slate-600">Bankrekening</th>
-            <th className="text-left px-4 py-2 font-semibold text-slate-600">Tegenpartij</th>
-            <th className="text-right px-4 py-2 font-semibold text-slate-600">Bedrag</th>
-            <th className="text-right px-4 py-2 font-semibold text-slate-600">Niet gekoppeld</th>
-            <th className="text-left px-4 py-2 font-semibold text-slate-600">Actie</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-            const signed = r.deposit - r.withdrawal;
-            return (
+      <>
+        {filterBar(visible.length)}
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <SortHeader field="date" label="Datum" sort={sort} onSort={setSort} />
+              <SortHeader field="bank_account" label="Bankrekening" sort={sort} onSort={setSort} />
+              <SortHeader field="bank_party_name" label="Tegenpartij" sort={sort} onSort={setSort} />
+              <SortHeader field="signed" label="Bedrag" align="right" sort={sort} onSort={setSort} />
+              <SortHeader field="unallocated_amount" label="Niet gekoppeld" align="right" sort={sort} onSort={setSort} />
+              <SortHeader field="name" label="Actie" sort={sort} onSort={setSort} />
+            </tr>
+          </thead>
+          <tbody>
+            {visible.length === 0 ? noMatchRow(6) : visible.map((r) => (
               <tr key={r.name} className="border-b border-slate-100 hover:bg-slate-50">
                 <td className="px-4 py-2 text-slate-500">{r.date}</td>
                 <td className="px-4 py-2 text-slate-600">{r.bank_account}</td>
                 <td className="px-4 py-2">{r.bank_party_name || r.party || "-"}</td>
-                <td className={`px-4 py-2 text-right ${signed < 0 ? "text-red-600" : "text-emerald-600"}`}>
-                  {signed < 0 ? "− " : "+ "}{fmtEur(Math.abs(signed))}
+                <td className={`px-4 py-2 text-right ${r.signed < 0 ? "text-red-600" : "text-emerald-600"}`}>
+                  {r.signed < 0 ? "− " : "+ "}{fmtEur(Math.abs(r.signed))}
                 </td>
                 <td className="px-4 py-2 text-right font-semibold text-indigo-700">{fmtEur(r.unallocated_amount)}</td>
                 <td className="px-4 py-2">
@@ -656,121 +791,131 @@ function DrillTable({ kind, items, erpAppUrl, selectedPis, paidInBatch, onToggle
                   </a>
                 </td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            ))}
+          </tbody>
+        </table>
+      </>
     );
   }
 
   const isSI = kind === "si_open" || kind === "si_draft" || kind === "si_returns_open";
   if (isSI) {
-    const rows = items as SalesInvoice[];
+    const all = items as SalesInvoice[];
+    const visible = sortRows(filterRows(all, search), sort);
     return (
-      <table className="w-full text-sm">
-        <thead className="bg-slate-50 border-b border-slate-200">
-          <tr>
-            <th className="text-left px-4 py-2 font-semibold text-slate-600">Datum</th>
-            <th className="text-left px-4 py-2 font-semibold text-slate-600">Klant</th>
-            <th className="text-left px-4 py-2 font-semibold text-slate-600">Factuur</th>
-            <th className="text-right px-4 py-2 font-semibold text-slate-600">Totaal</th>
-            <th className="text-right px-4 py-2 font-semibold text-slate-600">Openstaand</th>
-            <th className="text-left px-4 py-2 font-semibold text-slate-600">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.name} className="border-b border-slate-100 hover:bg-slate-50">
-              <td className="px-4 py-2 text-slate-500">{r.posting_date}</td>
-              <td className="px-4 py-2">{r.customer_name}</td>
-              <td className="px-4 py-2">
-                <a href={docLink("Sales Invoice", r.name)} target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline inline-flex items-center gap-1">
-                  {r.name} <ExternalLink size={10} />
-                </a>
-              </td>
-              <td className="px-4 py-2 text-right text-slate-700">{fmtEur(r.grand_total)}</td>
-              <td className={`px-4 py-2 text-right font-semibold ${r.outstanding_amount < 0 ? "text-pink-600" : "text-amber-700"}`}>{fmtEur(r.outstanding_amount)}</td>
-              <td className="px-4 py-2">
-                <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-700">{r.status}</span>
-              </td>
+      <>
+        {filterBar(visible.length)}
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <SortHeader field="posting_date" label="Datum" sort={sort} onSort={setSort} />
+              <SortHeader field="customer_name" label="Klant" sort={sort} onSort={setSort} />
+              <SortHeader field="name" label="Factuur" sort={sort} onSort={setSort} />
+              <SortHeader field="grand_total" label="Totaal" align="right" sort={sort} onSort={setSort} />
+              <SortHeader field="outstanding_amount" label="Openstaand" align="right" sort={sort} onSort={setSort} />
+              <SortHeader field="status" label="Status" sort={sort} onSort={setSort} />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {visible.length === 0 ? noMatchRow(6) : visible.map((r) => (
+              <tr key={r.name} className="border-b border-slate-100 hover:bg-slate-50">
+                <td className="px-4 py-2 text-slate-500">{r.posting_date}</td>
+                <td className="px-4 py-2">{r.customer_name}</td>
+                <td className="px-4 py-2">
+                  <a href={docLink("Sales Invoice", r.name)} target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline inline-flex items-center gap-1">
+                    {r.name} <ExternalLink size={10} />
+                  </a>
+                </td>
+                <td className="px-4 py-2 text-right text-slate-700">{fmtEur(r.grand_total)}</td>
+                <td className={`px-4 py-2 text-right font-semibold ${r.outstanding_amount < 0 ? "text-pink-600" : "text-amber-700"}`}>{fmtEur(r.outstanding_amount)}</td>
+                <td className="px-4 py-2">
+                  <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-700">{r.status}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </>
     );
   }
 
-  const rows = items as PurchaseInvoice[];
+  // PurchaseInvoice (pi_open + pi_no_pdf)
+  const all = items as PurchaseInvoice[];
+  const visible = sortRows(filterRows(all, search), sort);
   const showSelect = kind === "pi_open" && !!onTogglePi;
+  const colCount = (showSelect ? 1 : 0) + (kind === "pi_open" ? 7 : 6);
   return (
-    <table className="w-full text-sm">
-      <thead className="bg-slate-50 border-b border-slate-200">
-        <tr>
-          {showSelect && <th className="w-10 px-3 py-2"></th>}
-          <th className="text-left px-4 py-2 font-semibold text-slate-600">Datum</th>
-          <th className="text-left px-4 py-2 font-semibold text-slate-600">Leverancier</th>
-          <th className="text-left px-4 py-2 font-semibold text-slate-600">Factuurnr</th>
-          <th className="text-left px-4 py-2 font-semibold text-slate-600">Factuur</th>
-          <th className="text-right px-4 py-2 font-semibold text-slate-600">Totaal</th>
-          {kind === "pi_open" && (
-            <th className="text-right px-4 py-2 font-semibold text-slate-600">Openstaand</th>
-          )}
-          <th className="text-left px-4 py-2 font-semibold text-slate-600">Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => {
-          const isPaid = !!paidInBatch?.has(r.name);
-          const isSelected = !!selectedPis?.has(r.name);
-          return (
-          <tr key={r.name} className={`border-b border-slate-100 hover:bg-slate-50 ${isPaid ? "bg-slate-50 text-slate-400" : ""}`}>
-            {showSelect && (
-              <td className="px-3 py-2 text-center">
-                {isPaid ? (
-                  <span className="text-[10px] text-slate-400">batch</span>
-                ) : (
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => onTogglePi?.(r.name)}
-                    className="cursor-pointer accent-teal-600"
-                  />
-                )}
-              </td>
-            )}
-            <td className="px-4 py-2 text-slate-500">{r.posting_date}</td>
-            <td className="px-4 py-2">{r.supplier_name}</td>
-            <td className="px-4 py-2 text-slate-600">{r.bill_no || "-"}</td>
-            <td className="px-4 py-2">
-              <a href={docLink("Purchase Invoice", r.name)} target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline inline-flex items-center gap-1">
-                {r.name} <ExternalLink size={10} />
-              </a>
-            </td>
-            <td className="px-4 py-2 text-right text-slate-700">{fmtEur(r.grand_total)}</td>
+    <>
+      {filterBar(visible.length)}
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 border-b border-slate-200">
+          <tr>
+            {showSelect && <th className="w-10 px-3 py-2"></th>}
+            <SortHeader field="posting_date" label="Datum" sort={sort} onSort={setSort} />
+            <SortHeader field="supplier_name" label="Leverancier" sort={sort} onSort={setSort} />
+            <SortHeader field="bill_no" label="Factuurnr" sort={sort} onSort={setSort} />
+            <SortHeader field="name" label="Factuur" sort={sort} onSort={setSort} />
+            <SortHeader field="grand_total" label="Totaal" align="right" sort={sort} onSort={setSort} />
             {kind === "pi_open" && (
-              <td className="px-4 py-2 text-right font-semibold text-red-700">{fmtEur(r.outstanding_amount)}</td>
+              <SortHeader field="outstanding_amount" label="Openstaand" align="right" sort={sort} onSort={setSort} />
             )}
-            <td className="px-4 py-2">
-              {kind === "pi_no_pdf" ? (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-700">
-                  <AlertTriangle size={12} /> Geen PDF
-                </span>
-              ) : isPaid ? (
-                <button
-                  onClick={() => onClearPaid?.(r.name)}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                  title="Klik om de batch-markering te verwijderen"
-                >
-                  In batch verstuurd
-                </button>
-              ) : (
-                <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-700">{r.status}</span>
-              )}
-            </td>
+            <SortHeader field="status" label="Status" sort={sort} onSort={setSort} />
           </tr>
-          );
-        })}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {visible.length === 0 ? noMatchRow(colCount) : visible.map((r) => {
+            const isPaid = !!paidInBatch?.has(r.name);
+            const isSelected = !!selectedPis?.has(r.name);
+            return (
+              <tr key={r.name} className={`border-b border-slate-100 hover:bg-slate-50 ${isPaid ? "bg-slate-50 text-slate-400" : ""}`}>
+                {showSelect && (
+                  <td className="px-3 py-2 text-center">
+                    {isPaid ? (
+                      <span className="text-[10px] text-slate-400">batch</span>
+                    ) : (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => onTogglePi?.(r.name)}
+                        className="cursor-pointer accent-teal-600"
+                      />
+                    )}
+                  </td>
+                )}
+                <td className="px-4 py-2 text-slate-500">{r.posting_date}</td>
+                <td className="px-4 py-2">{r.supplier_name}</td>
+                <td className="px-4 py-2 text-slate-600">{r.bill_no || "-"}</td>
+                <td className="px-4 py-2">
+                  <a href={docLink("Purchase Invoice", r.name)} target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline inline-flex items-center gap-1">
+                    {r.name} <ExternalLink size={10} />
+                  </a>
+                </td>
+                <td className="px-4 py-2 text-right text-slate-700">{fmtEur(r.grand_total)}</td>
+                {kind === "pi_open" && (
+                  <td className="px-4 py-2 text-right font-semibold text-red-700">{fmtEur(r.outstanding_amount)}</td>
+                )}
+                <td className="px-4 py-2">
+                  {kind === "pi_no_pdf" ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-700">
+                      <AlertTriangle size={12} /> Geen PDF
+                    </span>
+                  ) : isPaid ? (
+                    <button
+                      onClick={() => onClearPaid?.(r.name)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                      title="Klik om de batch-markering te verwijderen"
+                    >
+                      In batch verstuurd
+                    </button>
+                  ) : (
+                    <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-700">{r.status}</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </>
   );
 }
