@@ -370,14 +370,16 @@ export default function App() {
           <h2 className="text-2xl font-bold text-slate-800">Penningmeester</h2>
           <p className="text-sm text-slate-500 mt-1">Overzicht openstaand, ontbrekende PDFs, losse betalingen en banktransacties</p>
         </div>
-        <button
-          onClick={loadAll}
-          disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 cursor-pointer"
-        >
-          <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-          Vernieuwen
-        </button>
+        {tab === "overview" && (
+          <button
+            onClick={loadAll}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 cursor-pointer"
+          >
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            Vernieuwen
+          </button>
+        )}
       </div>
 
       {error && (
