@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { RefreshCw, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
+import { RefreshCw, ChevronDown, ChevronRight, ExternalLink, Plus, Check, X, Loader2 } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 
 /**
@@ -44,6 +44,22 @@ interface CoopOutgoingSI {
 
 const ZERO_HOURS_TYPE = "Nuluren contract";
 const COOP_COMPANY = "3BM Coöperatie U.A.";
+
+// Vaste SI-template-velden voor Coöp-uitgaande facturen, gebaseerd op het
+// bestaande boekingspatroon (zie 267-00237 / 267-00245). Voorkomt dat Frappe
+// fall-back op verkeerde defaults bij ontbrekende velden.
+const COOP_ADMIN_ITEM_NAME = "Coöperatie-administratie";
+const SI_TAXES_TEMPLATE = "Netherlands VAT 21% - 7";
+const SI_TAX_CATEGORY = "EU NL Full tax";
+const SI_PAYMENT_TERMS = "21 Dagen";
+const SI_LETTER_HEAD = "3BM_BWK_G2O";
+const SI_COST_CENTER = "Main - 7";
+const SI_INCOME_ACCOUNT = "Sales - 7";
+
+const MONTH_LABELS_FULL = [
+  "januari", "februari", "maart", "april", "mei", "juni",
+  "juli", "augustus", "september", "oktober", "november", "december",
+];
 
 const COST_BASE_KEY = "coop_admin_personeel_cost_base";
 const COST_MARGINAL_KEY = "coop_admin_personeel_cost_marginal";
@@ -111,12 +127,19 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [siRevenue, setSiRevenue] = useState<SIRevenue[]>([]);
   const [coopOutgoing, setCoopOutgoing] = useState<CoopOutgoingSI[]>([]);
+  // Map<`${customer}|${YYYY-MM}`, siName> — bestaande Coöperatie-administratie SI's voor dup-detectie
+  const [existingAdminSI, setExistingAdminSI] = useState<Map<string, string>>(new Map());
   const [expanded, setExpanded] = useState<string | null>(null); // key = `${month}-${company}`
   const [expandedCoopCol, setExpandedCoopCol] = useState<string | null>(null);
   const [onlyActive, setOnlyActive] = useState(true);
   const [hideZeroHours, setHideZeroHours] = useState(true);
   const [costBase, setCostBase] = useState<number>(() => loadCost(COST_BASE_KEY, DEFAULT_BASE));
   const [costMarginal, setCostMarginal] = useState<number>(() => loadCost(COST_MARGINAL_KEY, DEFAULT_MARGINAL));
+  // Invoice-create state — confirm dialog + per-cel loading + error toast
+  const [confirmCell, setConfirmCell] = useState<{ month: number; company: string; cost: number; count: number } | null>(null);
+  const [creatingKey, setCreatingKey] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => { localStorage.setItem(COST_BASE_KEY, String(costBase)); }, [costBase]);
   useEffect(() => { localStorage.setItem(COST_MARGINAL_KEY, String(costMarginal)); }, [costMarginal]);
@@ -212,7 +235,43 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
       }
     })();
     return () => { cancelled = true; };
-  }, [year]);
+  }, [year, refreshTick]);
+
+  // Dup-detectie: vind bestaande SI's met item_name = "Coöperatie-administratie"
+  // door alle items van de coopOutgoing-set op te vragen en te indexeren op
+  // (customer, YYYY-MM). Voorkomt dubbele facturen bij meermaals klikken.
+  useEffect(() => {
+    let cancelled = false;
+    if (coopOutgoing.length === 0) {
+      setExistingAdminSI(new Map());
+      return;
+    }
+    (async () => {
+      try {
+        const parents = coopOutgoing.map((si) => si.name);
+        const items = await yapp.fetchList<{ parent: string; item_name: string }>("Sales Invoice Item", {
+          fields: ["parent", "item_name"],
+          filters: [
+            ["parent", "in", parents],
+            ["item_name", "=", COOP_ADMIN_ITEM_NAME],
+          ],
+          limit_page_length: 5000,
+        });
+        const parentToSI = new Map(coopOutgoing.map((si) => [si.name, si]));
+        const m = new Map<string, string>();
+        for (const it of items) {
+          const si = parentToSI.get(it.parent);
+          if (!si) continue;
+          const month = si.posting_date.slice(0, 7); // YYYY-MM
+          m.set(`${si.customer}|${month}`, si.name);
+        }
+        if (!cancelled) setExistingAdminSI(m);
+      } catch {
+        if (!cancelled) setExistingAdminSI(new Map());
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [coopOutgoing]);
 
   // Omzet per company op 100%-basis:
   //  - Externe SI's (is_internal_customer=0): tellen 1-op-1
@@ -362,6 +421,57 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
   const siLink = (siName: string) =>
     erpAppUrl ? `${erpAppUrl}/app/sales-invoice/${encodeURIComponent(siName)}` : "#";
 
+  function buildDescription(month: number, count: number): string {
+    const monthLabel = MONTH_LABELS_FULL[month];
+    const baseTxt = `basis € ${costBase}`;
+    if (count <= 2) {
+      return `Coöperatie-administratie ${monthLabel} ${year} — ${count} medewerker${count === 1 ? "" : "s"} (${baseTxt})`;
+    }
+    return `Coöperatie-administratie ${monthLabel} ${year} — ${count} medewerkers (${baseTxt} + ${count - 2} × € ${costMarginal})`;
+  }
+
+  // Maakt een Sales Invoice draft via frappe.client.insert. We gebruiken
+  // callMethod omdat Y-app's ExtensionHost DISPATCH (nog) geen createDocument
+  // doorgeeft — wel callMethod, en frappe.client.insert is core-whitelisted.
+  async function createCoopAdminInvoice(month: number, company: string, count: number, cost: number) {
+    const key = `${month}-${company}`;
+    setCreatingKey(key);
+    setCreateError(null);
+    try {
+      const postingDate = ymd(year, month, lastDay(year, month));
+      const doc = {
+        doctype: "Sales Invoice",
+        company: COOP_COMPANY,
+        customer: company,
+        posting_date: postingDate,
+        set_posting_time: 1,
+        taxes_and_charges: SI_TAXES_TEMPLATE,
+        tax_category: SI_TAX_CATEGORY,
+        payment_terms_template: SI_PAYMENT_TERMS,
+        letter_head: SI_LETTER_HEAD,
+        cost_center: SI_COST_CENTER,
+        items: [
+          {
+            item_name: COOP_ADMIN_ITEM_NAME,
+            description: buildDescription(month, count),
+            qty: 1,
+            rate: cost,
+            uom: "Nos",
+            income_account: SI_INCOME_ACCOUNT,
+            cost_center: SI_COST_CENTER,
+          },
+        ],
+      };
+      await yapp.callMethod("frappe.client.insert", { doc });
+      setConfirmCell(null);
+      setRefreshTick((t) => t + 1);
+    } catch (e) {
+      setCreateError(e instanceof Error ? e.message : "Onbekende fout bij aanmaken factuur");
+    } finally {
+      setCreatingKey(null);
+    }
+  }
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
       <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-3">
@@ -486,6 +596,10 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
                         const cost = monthlyCostMatrix[m][c];
                         const key = `${m}-${c}`;
                         const isOpen = expanded === key;
+                        const monthKey = `${year}-${String(m + 1).padStart(2, "0")}`;
+                        const existingSI = existingAdminSI.get(`${c}|${monthKey}`);
+                        const canInvoice = cost > 0 && c !== COOP_COMPANY;
+                        const isCreating = creatingKey === key;
                         return (
                           <td key={c} className="px-2 py-1 text-right">
                             {count > 0 ? (
@@ -501,9 +615,32 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
                                   {count}
                                 </button>
                                 {cost > 0 && (
-                                  <span className="text-[10px] text-slate-400 tabular-nums mt-0.5">
-                                    {fmtEur(cost)}
-                                  </span>
+                                  <div className="inline-flex items-center gap-1 mt-0.5">
+                                    <span className="text-[10px] text-slate-400 tabular-nums">
+                                      {fmtEur(cost)}
+                                    </span>
+                                    {canInvoice && existingSI && (
+                                      <a
+                                        href={siLink(existingSI)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center text-emerald-600 hover:text-emerald-700"
+                                        title={`Al gefactureerd — ${existingSI}`}
+                                      >
+                                        <Check size={11} />
+                                      </a>
+                                    )}
+                                    {canInvoice && !existingSI && (
+                                      <button
+                                        onClick={() => setConfirmCell({ month: m, company: c, cost, count })}
+                                        disabled={isCreating}
+                                        className="inline-flex items-center text-slate-300 hover:text-teal-600 disabled:opacity-50 cursor-pointer"
+                                        title="Maak draft-factuur voor deze maand"
+                                      >
+                                        {isCreating ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+                                      </button>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                             ) : (
@@ -784,6 +921,81 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
           </table>
         </div>
       )}
+
+      {createError && (
+        <div className="m-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+          <span className="text-red-700 text-sm flex-1">Factuur niet aangemaakt: {createError}</span>
+          <button
+            onClick={() => setCreateError(null)}
+            className="text-red-400 hover:text-red-600 cursor-pointer"
+            title="Sluiten"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {confirmCell && (() => {
+        const { month, company, cost, count } = confirmCell;
+        const postingDate = ymd(year, month, lastDay(year, month));
+        const grand = cost * 1.21;
+        const key = `${month}-${company}`;
+        const isCreating = creatingKey === key;
+        return (
+          <div
+            className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 p-4"
+            onClick={() => !isCreating && setConfirmCell(null)}
+          >
+            <div
+              className="bg-white rounded-xl shadow-xl max-w-lg w-full p-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between mb-3">
+                <h3 className="text-base font-semibold text-slate-800">
+                  Coöp-factuur aanmaken (draft)
+                </h3>
+                <button
+                  onClick={() => !isCreating && setConfirmCell(null)}
+                  disabled={isCreating}
+                  className="text-slate-400 hover:text-slate-600 disabled:opacity-50 cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <table className="w-full text-sm mb-4">
+                <tbody>
+                  <tr><td className="py-1 text-slate-500 pr-3 w-32">Van</td><td className="text-slate-800">{COOP_COMPANY}</td></tr>
+                  <tr><td className="py-1 text-slate-500 pr-3">Aan</td><td className="text-slate-800">{company}</td></tr>
+                  <tr><td className="py-1 text-slate-500 pr-3">Periode</td><td className="text-slate-800">{MONTH_LABELS_FULL[month]} {year} ({count} medewerker{count === 1 ? "" : "s"})</td></tr>
+                  <tr><td className="py-1 text-slate-500 pr-3">Factuurdatum</td><td className="text-slate-800 tabular-nums">{postingDate}</td></tr>
+                  <tr><td className="py-1 text-slate-500 pr-3">Item</td><td className="text-slate-800">{COOP_ADMIN_ITEM_NAME}</td></tr>
+                  <tr><td className="py-1 text-slate-500 pr-3">Beschrijving</td><td className="text-slate-600 text-xs">{buildDescription(month, count)}</td></tr>
+                  <tr><td className="py-1 text-slate-500 pr-3">Netto</td><td className="text-slate-800 tabular-nums">{fmtEur(cost)}</td></tr>
+                  <tr><td className="py-1 text-slate-500 pr-3">BTW 21%</td><td className="text-slate-500 tabular-nums">{fmtEur(cost * 0.21)}</td></tr>
+                  <tr><td className="py-1 text-slate-500 pr-3">Bruto</td><td className="text-slate-800 tabular-nums font-semibold">{fmtEur(grand)}</td></tr>
+                </tbody>
+              </table>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  onClick={() => setConfirmCell(null)}
+                  disabled={isCreating}
+                  className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50 cursor-pointer"
+                >
+                  Annuleer
+                </button>
+                <button
+                  onClick={() => createCoopAdminInvoice(month, company, count, cost)}
+                  disabled={isCreating}
+                  className="px-3 py-1.5 bg-teal-600 text-white text-sm rounded-lg hover:bg-teal-700 disabled:opacity-50 inline-flex items-center gap-2 cursor-pointer"
+                >
+                  {isCreating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  Maak draft
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
