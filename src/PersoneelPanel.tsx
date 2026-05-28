@@ -170,13 +170,13 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
   }, [matrix, columns]);
 
   // Kosten/jaar per company op basis van piek-headcount.
-  // Coöp betaalt niks (0). Anders: base + max(piek - 1, 0) × marginal.
+  // Coöp betaalt niks (0). Solo (1 persoon) = base. Vanaf 2 personen: piek × marginaal.
   const costPerColumn = useMemo(() => {
     const out: Record<string, number> = {};
     for (const c of columns) {
       if (c === COOP_COMPANY) { out[c] = 0; continue; }
       const n = peakPerColumn[c] ?? 0;
-      out[c] = n === 0 ? 0 : costBase + Math.max(n - 1, 0) * costMarginal;
+      out[c] = n === 0 ? 0 : n === 1 ? costBase : n * costMarginal;
     }
     return out;
   }, [columns, peakPerColumn, costBase, costMarginal]);
@@ -241,7 +241,7 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
       <div className="px-5 py-2 bg-white border-b border-slate-100 flex items-center gap-4 flex-wrap text-sm">
         <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Kosten/jaar per entiteit</span>
         <label className="inline-flex items-center gap-2 text-slate-600">
-          Eerste medewerker/eigenaar
+          Solo (1 persoon)
           <span className="text-slate-400">€</span>
           <input
             type="number"
@@ -253,7 +253,7 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
           />
         </label>
         <label className="inline-flex items-center gap-2 text-slate-600">
-          Volgende medewerker
+          Per medewerker (2+)
           <span className="text-slate-400">€</span>
           <input
             type="number"
@@ -265,7 +265,7 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
           />
         </label>
         <span className="text-xs text-slate-400">
-          Formule: base + (piek − 1) × marginaal. Coöperatie betaalt niks.
+          1 persoon = solo-tarief. Vanaf 2: piek × tarief/medewerker. Coöperatie betaalt niks.
         </span>
       </div>
 
