@@ -31,6 +31,17 @@ interface SIRevenue {
   is_internal_customer: number;
 }
 
+interface CoopOutgoingSI {
+  name: string;
+  posting_date: string;
+  customer: string;
+  customer_name: string;
+  net_total: number;
+  grand_total: number;
+  status: string;
+  docstatus: number;
+}
+
 const ZERO_HOURS_TYPE = "Nuluren contract";
 const COOP_COMPANY = "3BM Coöperatie U.A.";
 
@@ -99,7 +110,9 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [siRevenue, setSiRevenue] = useState<SIRevenue[]>([]);
+  const [coopOutgoing, setCoopOutgoing] = useState<CoopOutgoingSI[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null); // key = `${month}-${company}`
+  const [expandedCoopCol, setExpandedCoopCol] = useState<string | null>(null);
   const [onlyActive, setOnlyActive] = useState(true);
   const [hideZeroHours, setHideZeroHours] = useState(true);
   const [costBase, setCostBase] = useState<number>(() => loadCost(COST_BASE_KEY, DEFAULT_BASE));
@@ -165,6 +178,37 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
         if (!cancelled) setSiRevenue(sis);
       } catch {
         if (!cancelled) setSiRevenue([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [year]);
+
+  // Coöp-uitgaande intercompany-SI's (draft + submitted) voor het jaar.
+  // Dit zijn de facturen die de Coöperatie aan haar leden stuurt voor admin-/
+  // personeelskosten — naast de berekende "Kosten/jaar" gezet om te zien of
+  // er ondergefactureerd of overgefactureerd wordt.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const sis = await yapp.fetchList<CoopOutgoingSI>("Sales Invoice", {
+          fields: [
+            "name", "posting_date", "customer", "customer_name",
+            "net_total", "grand_total", "status", "docstatus",
+          ],
+          filters: [
+            ["company", "=", COOP_COMPANY],
+            ["is_internal_customer", "=", 1],
+            ["docstatus", "<", 2],
+            ["posting_date", ">=", `${year}-01-01`],
+            ["posting_date", "<=", `${year}-12-31`],
+          ],
+          limit_page_length: 1000,
+          order_by: "posting_date asc",
+        });
+        if (!cancelled) setCoopOutgoing(sis);
+      } catch {
+        if (!cancelled) setCoopOutgoing([]);
       }
     })();
     return () => { cancelled = true; };
@@ -271,8 +315,52 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
     [costPerColumn],
   );
 
+  // Werkelijk gefactureerd door de Coöp per entiteit-kolom. Customer-naam
+  // matcht doorgaans 1-op-1 met de company-naam (zie INTERCO_CUSTOMERS in
+  // IntercompanyPanel). Fallback: probeer customer_name als customer (= ID)
+  // niet als kolom voorkomt.
+  const invoicedByCompany = useMemo(() => {
+    const m = new Map<string, number>();
+    const colSet = new Set(columns);
+    for (const si of coopOutgoing) {
+      const key = colSet.has(si.customer)
+        ? si.customer
+        : colSet.has(si.customer_name)
+        ? si.customer_name
+        : null;
+      if (!key) continue;
+      m.set(key, (m.get(key) ?? 0) + (si.net_total ?? 0));
+    }
+    return m;
+  }, [coopOutgoing, columns]);
+
+  const invoicesByCompany = useMemo(() => {
+    const m = new Map<string, CoopOutgoingSI[]>();
+    const colSet = new Set(columns);
+    for (const si of coopOutgoing) {
+      const key = colSet.has(si.customer)
+        ? si.customer
+        : colSet.has(si.customer_name)
+        ? si.customer_name
+        : null;
+      if (!key) continue;
+      const list = m.get(key) ?? [];
+      list.push(si);
+      m.set(key, list);
+    }
+    return m;
+  }, [coopOutgoing, columns]);
+
+  const invoicedTotal = useMemo(
+    () => Array.from(invoicedByCompany.values()).reduce((s, v) => s + v, 0),
+    [invoicedByCompany],
+  );
+
   const erpLink = (empName: string) =>
     erpAppUrl ? `${erpAppUrl}/app/employee/${encodeURIComponent(empName)}` : "#";
+
+  const siLink = (siName: string) =>
+    erpAppUrl ? `${erpAppUrl}/app/sales-invoice/${encodeURIComponent(siName)}` : "#";
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -503,6 +591,156 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
                 ))}
                 <td className="px-2 py-1.5 text-right tabular-nums text-teal-700">{fmtEur(costTotal)}</td>
               </tr>
+              <tr className="bg-slate-50/80">
+                <td
+                  className="px-2 py-1.5 text-slate-500 text-[10px] uppercase tracking-wide"
+                  title="Werkelijk verstuurde Sales Invoices vanuit de Coöperatie (draft + submitted, exclusief BTW). Klik op een bedrag voor de factuurlijst."
+                >
+                  Gefactureerd door Coöp
+                </td>
+                {columns.map((c) => {
+                  if (c === COOP_COMPANY) {
+                    return <td key={c} className="px-2 py-1.5 text-right text-slate-300">—</td>;
+                  }
+                  const amt = invoicedByCompany.get(c) ?? 0;
+                  const count = invoicesByCompany.get(c)?.length ?? 0;
+                  const isOpen = expandedCoopCol === c;
+                  return (
+                    <td key={c} className="px-2 py-1.5 text-right tabular-nums">
+                      {count > 0 ? (
+                        <button
+                          onClick={() => setExpandedCoopCol(isOpen ? null : c)}
+                          className={`inline-flex items-center gap-1 px-1.5 py-0 rounded hover:bg-teal-50 cursor-pointer ${
+                            isOpen ? "bg-teal-100 text-teal-800 font-semibold" : "text-slate-600"
+                          }`}
+                          title={`${count} factu${count === 1 ? "ur" : "ren"} — klik voor details`}
+                        >
+                          {isOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                          {fmtEur(amt)}
+                        </button>
+                      ) : (
+                        <span className="text-slate-300">{fmtEur(0)}</span>
+                      )}
+                    </td>
+                  );
+                })}
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{fmtEur(invoicedTotal)}</td>
+              </tr>
+              <tr className="bg-slate-50/80">
+                <td
+                  className="px-2 py-1.5 text-slate-500 text-[10px] uppercase tracking-wide"
+                  title="Gefactureerd minus verwachte Coöp-kosten. Negatief = ondergefactureerd, positief = overgefactureerd."
+                >
+                  Verschil
+                </td>
+                {columns.map((c) => {
+                  if (c === COOP_COMPANY) {
+                    return <td key={c} className="px-2 py-1.5 text-right text-slate-300">—</td>;
+                  }
+                  const expected = costPerColumn[c] ?? 0;
+                  const actual = invoicedByCompany.get(c) ?? 0;
+                  const delta = actual - expected;
+                  if (expected === 0 && actual === 0) {
+                    return <td key={c} className="px-2 py-1.5 text-right text-slate-300">—</td>;
+                  }
+                  const tone =
+                    Math.abs(delta) < 1
+                      ? "text-emerald-600"
+                      : delta < 0
+                      ? "text-rose-600"
+                      : "text-amber-600";
+                  const sign = delta > 0 ? "+" : delta < 0 ? "−" : "";
+                  return (
+                    <td key={c} className={`px-2 py-1.5 text-right tabular-nums ${tone}`}>
+                      {sign}{fmtEur(Math.abs(delta))}
+                    </td>
+                  );
+                })}
+                {(() => {
+                  const delta = invoicedTotal - costTotal;
+                  if (costTotal === 0 && invoicedTotal === 0) {
+                    return <td className="px-2 py-1.5 text-right text-slate-300">—</td>;
+                  }
+                  const tone =
+                    Math.abs(delta) < 1
+                      ? "text-emerald-600"
+                      : delta < 0
+                      ? "text-rose-600"
+                      : "text-amber-600";
+                  const sign = delta > 0 ? "+" : delta < 0 ? "−" : "";
+                  return (
+                    <td className={`px-2 py-1.5 text-right tabular-nums ${tone}`}>
+                      {sign}{fmtEur(Math.abs(delta))}
+                    </td>
+                  );
+                })()}
+              </tr>
+              {expandedCoopCol && (() => {
+                const list = invoicesByCompany.get(expandedCoopCol) ?? [];
+                const expected = costPerColumn[expandedCoopCol] ?? 0;
+                const actual = invoicedByCompany.get(expandedCoopCol) ?? 0;
+                return (
+                  <tr className="bg-teal-50/40">
+                    <td colSpan={columns.length + 2} className="px-2 py-2">
+                      <div className="text-xs text-slate-500 uppercase tracking-wide mb-2 flex items-center justify-between">
+                        <span>
+                          Coöp-facturen aan {expandedCoopCol} · {year} · {list.length} {list.length === 1 ? "factuur" : "facturen"}
+                        </span>
+                        <span className="text-slate-400 normal-case tracking-normal">
+                          Verwacht {fmtEur(expected)} · Gefactureerd {fmtEur(actual)}
+                        </span>
+                      </div>
+                      <table className="w-full text-xs bg-white border border-slate-200 rounded">
+                        <thead className="bg-slate-50">
+                          <tr className="text-left text-slate-500">
+                            <th className="px-2 py-1 font-medium">Datum</th>
+                            <th className="px-2 py-1 font-medium">Nummer</th>
+                            <th className="px-2 py-1 font-medium text-right">Netto</th>
+                            <th className="px-2 py-1 font-medium text-right">Bruto</th>
+                            <th className="px-2 py-1 font-medium">Status</th>
+                            <th className="px-2 py-1 font-medium w-6"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {list
+                            .slice()
+                            .sort((a, b) => a.posting_date.localeCompare(b.posting_date))
+                            .map((si) => {
+                              const isDraft = si.docstatus === 0;
+                              const badgeTone = isDraft
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-emerald-100 text-emerald-700";
+                              return (
+                                <tr key={si.name} className="border-t border-slate-100 hover:bg-slate-50">
+                                  <td className="px-2 py-1 text-slate-600 tabular-nums">{si.posting_date}</td>
+                                  <td className="px-2 py-1 text-slate-700">{si.name}</td>
+                                  <td className="px-2 py-1 text-right tabular-nums text-slate-700">{fmtEur(si.net_total)}</td>
+                                  <td className="px-2 py-1 text-right tabular-nums text-slate-500">{fmtEur(si.grand_total)}</td>
+                                  <td className="px-2 py-1">
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${badgeTone}`}>
+                                      {isDraft ? "Draft" : si.status}
+                                    </span>
+                                  </td>
+                                  <td className="px-2 py-1">
+                                    <a
+                                      href={siLink(si.name)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-slate-400 hover:text-teal-700 inline-flex"
+                                      title="Open in ERPNext"
+                                    >
+                                      <ExternalLink size={12} />
+                                    </a>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </td>
+                  </tr>
+                );
+              })()}
               <tr className="bg-slate-50/60">
                 <td
                   className="px-2 py-1.5 text-slate-500 text-[10px] uppercase tracking-wide"
