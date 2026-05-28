@@ -94,22 +94,26 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
     setLoading(true);
     setError(null);
     try {
+      const allYears = year === 0;
       const fromDate = `${year}-01-01`;
       const toDate = `${year}-12-31`;
       const fields = [
         "name", "posting_date", "due_date", "supplier", "supplier_name", "bill_no",
         "net_total", "grand_total", "outstanding_amount", "status", "docstatus",
       ];
+      const piFilters: unknown[][] = [
+        ["company", "=", COOP_COMPANY],
+        ["supplier", "in", INTERCO_SUPPLIERS],
+        ["docstatus", "=", 1],
+      ];
+      if (!allYears) {
+        piFilters.push(["posting_date", ">=", fromDate]);
+        piFilters.push(["posting_date", "<=", toDate]);
+      }
       const [list, openList, openSiList] = await Promise.all([
         yapp.fetchList<PurchaseInvoiceForInterco>("Purchase Invoice", {
           fields,
-          filters: [
-            ["company", "=", COOP_COMPANY],
-            ["supplier", "in", INTERCO_SUPPLIERS],
-            ["posting_date", ">=", fromDate],
-            ["posting_date", "<=", toDate],
-            ["docstatus", "=", 1],
-          ],
+          filters: piFilters,
           limit_page_length: 2000,
           order_by: "posting_date asc",
         }),

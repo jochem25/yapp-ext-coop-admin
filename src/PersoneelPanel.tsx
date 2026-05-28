@@ -83,7 +83,12 @@ function inEmployment(emp: Employee, monthStart: string, monthEnd: string): bool
   return true;
 }
 
-export default function PersoneelPanel({ year, erpAppUrl }: Props) {
+export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
+  // Matrix toont maand × entiteit: bij "Alle jaren" globaal (0) valt deze tab
+  // terug op het huidige jaar — een matrix kan per definitie maar één jaar
+  // tegelijk weergeven.
+  const year = rawYear > 0 ? rawYear : new Date().getFullYear();
+  const allYearsFallback = rawYear === 0;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -198,6 +203,7 @@ export default function PersoneelPanel({ year, erpAppUrl }: Props) {
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
             Klik op een aantal om de namen uit te klappen
+            {allYearsFallback && ` · "Alle jaren" niet ondersteund — toont ${year}.`}
           </p>
         </div>
         <div className="flex items-center gap-3">

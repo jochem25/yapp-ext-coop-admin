@@ -63,7 +63,12 @@ interface Props {
   erpAppUrl: string;
 }
 
-export default function CostMatrix({ company, year, erpAppUrl }: Props) {
+export default function CostMatrix({ company, year: rawYear, erpAppUrl }: Props) {
+  // Matrix toont maand × grootboek/leverancier: bij "Alle jaren" globaal (0)
+  // valt deze tab terug op het huidige jaar — een matrix kan per definitie
+  // maar één jaar tegelijk weergeven.
+  const year = rawYear > 0 ? rawYear : new Date().getFullYear();
+  const allYearsFallback = rawYear === 0;
   const [groupMode, setGroupMode] = useState<GroupMode>("account");
   const [hideEmpty, setHideEmpty] = useState<boolean>(true);
   const [sort, setSort] = useState<SortState | null>({ field: "total", dir: "desc" });
@@ -274,10 +279,11 @@ export default function CostMatrix({ company, year, erpAppUrl }: Props) {
     <div>
       <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h3 className="text-lg font-semibold text-slate-800">Algemene kosten — matrix per maand</h3>
+          <h3 className="text-lg font-semibold text-slate-800">Algemene kosten — matrix per maand {year}</h3>
           <p className="text-xs text-slate-500 mt-0.5">
             GL Entries waar grootboek root_type = Expense, gegroepeerd per {groupMode === "account" ? "grootboek" : "leverancier"}.
             {!company && " · Geen bedrijf gekozen: toont alle entiteiten."}
+            {allYearsFallback && ` · "Alle jaren" niet ondersteund — toont ${year}.`}
           </p>
         </div>
         <button

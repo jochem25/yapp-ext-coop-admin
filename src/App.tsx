@@ -252,21 +252,22 @@ export default function App() {
   async function loadAll() {
     setLoading(true);
     setError(null);
+    const allYears = year === 0;
     const fromDate = `${year}-01-01`;
     const toDate = `${year}-12-31`;
-    const baseFilters: unknown[][] = [
-      ["posting_date", ">=", fromDate],
-      ["posting_date", "<=", toDate],
-      ["docstatus", "!=", 2],
-    ];
+    const baseFilters: unknown[][] = [["docstatus", "!=", 2]];
+    if (!allYears) {
+      baseFilters.unshift(["posting_date", ">=", fromDate]);
+      baseFilters.unshift(["posting_date", "<=", toDate]);
+    }
     if (company) baseFilters.unshift(["company", "=", company]);
 
     // Bank Transaction uses the "date" field instead of "posting_date".
-    const btFilters: unknown[][] = [
-      ["date", ">=", fromDate],
-      ["date", "<=", toDate],
-      ["docstatus", "!=", 2],
-    ];
+    const btFilters: unknown[][] = [["docstatus", "!=", 2]];
+    if (!allYears) {
+      btFilters.unshift(["date", ">=", fromDate]);
+      btFilters.unshift(["date", "<=", toDate]);
+    }
     if (company) btFilters.unshift(["company", "=", company]);
 
     try {
@@ -405,6 +406,7 @@ export default function App() {
           onChange={(e) => setYear(parseInt(e.target.value, 10))}
           className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
         >
+          <option value={0}>Alle jaren</option>
           {Array.from({ length: 5 }, (_, i) => thisYear() - i).map((y) => (
             <option key={y} value={y}>{y}</option>
           ))}
