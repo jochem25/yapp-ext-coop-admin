@@ -101,10 +101,17 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
   useEffect(() => { localStorage.setItem(COST_BASE_KEY, String(costBase)); }, [costBase]);
   useEffect(() => { localStorage.setItem(COST_MARGINAL_KEY, String(costMarginal)); }, [costMarginal]);
 
+  // Per-maand zichtbaarheid wordt al correct afgehandeld via inEmployment()
+  // op basis van date_of_joining + relieving_date. Een werknemer die in maart
+  // is uitgestapt blijft dus zichtbaar in jan/feb/mrt — alleen vanaf april niet.
+  //
+  // `onlyActive` filtert nog WEL globaal de "ghosts": records met status ≠
+  // Active maar zonder relieving_date — daar kan geen einddatum bepaald worden,
+  // dus zouden ze tot in den treure blijven verschijnen.
   const visibleEmployees = useMemo(
     () => employees.filter((e) => {
-      if (onlyActive && e.status !== "Active") return false;
       if (hideZeroHours && e.employment_type === ZERO_HOURS_TYPE) return false;
+      if (onlyActive && e.status !== "Active" && !e.relieving_date) return false;
       return true;
     }),
     [employees, onlyActive, hideZeroHours],
@@ -174,17 +181,36 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
     return out;
   }, [matrix, columns]);
 
-  // Kosten/jaar per company op basis van piek-headcount.
-  // Coöp betaalt niks (0). Solo (1 persoon) = base. Vanaf 2 personen: piek × marginaal.
+  // Coöperatie-kosten per maand per entiteit op basis van die-maand-headcount.
+  // De jaarbedragen zijn input; maand-bedrag = jaarbedrag / 12. Coöp betaalt
+  // zelf nooit (0). De jaartotal-kolom is de SOM van 12 maand-bedragen — niet
+  // piek-based — want de factuur loopt mee met het werkelijke ledental.
+  function monthlyCostForCount(n: number): number {
+    if (n === 0) return 0;
+    if (n === 1) return costBase / 12;
+    return (n * costMarginal) / 12;
+  }
+
+  const monthlyCostMatrix = useMemo(() => {
+    const out: Record<number, Record<string, number>> = {};
+    for (let m = 0; m < 12; m++) {
+      out[m] = {};
+      for (const c of columns) {
+        out[m][c] = c === COOP_COMPANY ? 0 : monthlyCostForCount(matrix[m][c].length);
+      }
+    }
+    return out;
+  }, [matrix, columns, costBase, costMarginal]);
+
   const costPerColumn = useMemo(() => {
     const out: Record<string, number> = {};
     for (const c of columns) {
-      if (c === COOP_COMPANY) { out[c] = 0; continue; }
-      const n = peakPerColumn[c] ?? 0;
-      out[c] = n === 0 ? 0 : n === 1 ? costBase : n * costMarginal;
+      let sum = 0;
+      for (let m = 0; m < 12; m++) sum += monthlyCostMatrix[m][c];
+      out[c] = sum;
     }
     return out;
-  }, [columns, peakPerColumn, costBase, costMarginal]);
+  }, [monthlyCostMatrix, columns]);
 
   const costTotal = useMemo(
     () => Object.values(costPerColumn).reduce((s, v) => s + v, 0),
@@ -220,7 +246,10 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
             </span>
             Verberg 0-uren
           </label>
-          <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+          <label
+            className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none"
+            title="Verberg records met status ≠ Active maar zonder einddatum (data-glitch). Werknemers met een geldige relieving_date blijven zichtbaar in de maanden vóór hun vertrek."
+          >
             <span className="relative inline-flex items-center">
               <input
                 type="checkbox"
@@ -231,7 +260,7 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
               <span className="w-9 h-5 bg-slate-200 rounded-full peer-checked:bg-teal-600 transition-colors"></span>
               <span className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
             </span>
-            Alleen actieve
+            Verberg ghosts
           </label>
           <button
             onClick={load}
@@ -271,7 +300,8 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
           />
         </label>
         <span className="text-xs text-slate-400">
-          1 persoon = solo-tarief. Vanaf 2: piek × tarief/medewerker. Coöperatie betaalt niks.
+          Maandbedrag = jaartarief / 12. Solo-tarief bij 1 lid; vanaf 2 leden tarief × aantal-die-maand.
+          Jaartotaal = som van 12 maanden (loopt mee met werkelijk ledental). Coöperatie betaalt niks.
         </span>
       </div>
 
@@ -289,56 +319,72 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
 
       {columns.length > 0 && (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-xs">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                <th className="text-left px-4 py-2 font-semibold text-slate-600 w-24">Maand</th>
+                <th className="text-left px-2 py-1.5 font-semibold text-slate-600 w-20">Maand</th>
                 {columns.map((c) => (
-                  <th key={c} className="text-right px-4 py-2 font-semibold text-slate-600">
+                  <th key={c} className="text-right px-2 py-1.5 font-semibold text-slate-600">
                     {c}
                   </th>
                 ))}
-                <th className="text-right px-4 py-2 font-semibold text-slate-600 w-16">Totaal</th>
+                <th className="text-right px-2 py-1.5 font-semibold text-slate-600 w-20">Totaal</th>
               </tr>
             </thead>
             <tbody>
               {Array.from({ length: 12 }, (_, m) => {
                 const rowTotal = columns.reduce((s, c) => s + matrix[m][c].length, 0);
+                const rowCost = columns.reduce((s, c) => s + monthlyCostMatrix[m][c], 0);
                 return (
                   <Fragment key={m}>
                     <tr className="border-b border-slate-100 hover:bg-slate-50">
-                      <td className="px-4 py-2 text-slate-500 font-medium">{MONTH_LABELS[m]}</td>
+                      <td className="px-2 py-1 text-slate-500 font-medium">{MONTH_LABELS[m]}</td>
                       {columns.map((c) => {
                         const count = matrix[m][c].length;
+                        const cost = monthlyCostMatrix[m][c];
                         const key = `${m}-${c}`;
                         const isOpen = expanded === key;
                         return (
-                          <td key={c} className="px-4 py-2 text-right">
+                          <td key={c} className="px-2 py-1 text-right">
                             {count > 0 ? (
-                              <button
-                                onClick={() => setExpanded(isOpen ? null : key)}
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded hover:bg-teal-50 cursor-pointer ${
-                                  isOpen ? "bg-teal-100 text-teal-800 font-semibold" : "text-slate-700"
-                                }`}
-                                title="Klik om namen te tonen"
-                              >
-                                {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                                {count}
-                              </button>
+                              <div className="inline-flex flex-col items-end leading-tight">
+                                <button
+                                  onClick={() => setExpanded(isOpen ? null : key)}
+                                  className={`inline-flex items-center gap-1 px-1.5 py-0 rounded hover:bg-teal-50 cursor-pointer ${
+                                    isOpen ? "bg-teal-100 text-teal-800 font-semibold" : "text-slate-700"
+                                  }`}
+                                  title="Klik om namen te tonen"
+                                >
+                                  {isOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                                  {count}
+                                </button>
+                                {cost > 0 && (
+                                  <span className="text-[10px] text-slate-400 tabular-nums mt-0.5">
+                                    {fmtEur(cost)}
+                                  </span>
+                                )}
+                              </div>
                             ) : (
                               <span className="text-slate-300">–</span>
                             )}
                           </td>
                         );
                       })}
-                      <td className="px-4 py-2 text-right font-semibold text-slate-700">{rowTotal}</td>
+                      <td className="px-2 py-1 text-right text-slate-700">
+                        <div className="inline-flex flex-col items-end leading-tight">
+                          <span className="font-semibold">{rowTotal}</span>
+                          {rowCost > 0 && (
+                            <span className="text-[10px] text-slate-400 tabular-nums mt-0.5">{fmtEur(rowCost)}</span>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                     {expanded?.startsWith(`${m}-`) && (() => {
                       const cName = expanded.slice(`${m}-`.length);
                       const emps = matrix[m][cName] || [];
                       return (
                         <tr className="border-b border-slate-100 bg-teal-50/40">
-                          <td colSpan={columns.length + 2} className="px-4 py-3">
+                          <td colSpan={columns.length + 2} className="px-2 py-2">
                             <div className="text-xs text-slate-500 uppercase tracking-wide mb-2">
                               {MONTH_LABELS[m]} {year} · {cName} · {emps.length} {emps.length === 1 ? "persoon" : "personen"}
                             </div>
@@ -384,24 +430,24 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
-                <td className="px-4 py-2 text-slate-600 text-xs uppercase tracking-wide">Piek</td>
+                <td className="px-2 py-1.5 text-slate-600 text-[10px] uppercase tracking-wide">Piek</td>
                 {columns.map((c) => (
-                  <td key={c} className="px-4 py-2 text-right text-slate-700">{peakPerColumn[c]}</td>
+                  <td key={c} className="px-2 py-1.5 text-right text-slate-700">{peakPerColumn[c]}</td>
                 ))}
-                <td className="px-4 py-2 text-right text-teal-700">
+                <td className="px-2 py-1.5 text-right text-teal-700">
                   {Math.max(...Array.from({ length: 12 }, (_, m) =>
                     columns.reduce((s, c) => s + matrix[m][c].length, 0)
                   ))}
                 </td>
               </tr>
               <tr className="bg-slate-50 font-semibold">
-                <td className="px-4 py-2 text-slate-600 text-xs uppercase tracking-wide">Kosten/jaar</td>
+                <td className="px-2 py-1.5 text-slate-600 text-[10px] uppercase tracking-wide">Kosten/jaar</td>
                 {columns.map((c) => (
-                  <td key={c} className="px-4 py-2 text-right tabular-nums text-slate-700">
+                  <td key={c} className="px-2 py-1.5 text-right tabular-nums text-slate-700">
                     {c === COOP_COMPANY ? <span className="text-slate-300">—</span> : fmtEur(costPerColumn[c])}
                   </td>
                 ))}
-                <td className="px-4 py-2 text-right tabular-nums text-teal-700">{fmtEur(costTotal)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-teal-700">{fmtEur(costTotal)}</td>
               </tr>
             </tfoot>
           </table>
