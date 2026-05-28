@@ -93,7 +93,7 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null); // key = `${month}-${company}`
-  const [onlyActive, setOnlyActive] = useState(false);
+  const [onlyActive, setOnlyActive] = useState(true);
   const [hideZeroHours, setHideZeroHours] = useState(true);
   const [costBase, setCostBase] = useState<number>(() => loadCost(COST_BASE_KEY, DEFAULT_BASE));
   const [costMarginal, setCostMarginal] = useState<number>(() => loadCost(COST_MARGINAL_KEY, DEFAULT_MARGINAL));
