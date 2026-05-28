@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { RefreshCw, ChevronDown, ChevronRight, ExternalLink, Info } from "lucide-react";
+import { RefreshCw, ChevronDown, ChevronRight, ExternalLink, Info, Check, AlertTriangle, HelpCircle } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 
 /**
@@ -54,6 +54,28 @@ interface OpenSalesInvoice {
   status: string;
 }
 
+interface SIItemRow {
+  parent: string;       // SI-naam (= bill_no op de Coop-PI)
+  item_name: string;
+  qty: number;
+}
+
+/**
+ * Detecteert of een entiteit-SI duidelijk als 80%-doorbelasting is opgesteld.
+ * - "yes": item-naam bevat "80%" of "× 0,8" e.d., OF qty = 0,8 (historische marker)
+ * - "no":  items gevonden maar geen 80%-aanduiding (mogelijk regie zonder marker)
+ * - "unknown": geen items beschikbaar (fetch mislukt / SI niet gevonden)
+ */
+const EIGHTY_TEXT_RE = /(80\s*%|[*x×]\s*0[.,]8(?!\d))/i;
+function detectEighty(items: SIItemRow[] | undefined): "yes" | "no" | "unknown" {
+  if (!items || items.length === 0) return "unknown";
+  for (const it of items) {
+    if (EIGHTY_TEXT_RE.test(it.item_name ?? "")) return "yes";
+    if (Math.abs((it.qty ?? 0) - 0.8) < 0.0001) return "yes";
+  }
+  return "no";
+}
+
 function fmtEur(n: number): string {
   return `€ ${n.toLocaleString("nl-NL", {
     minimumFractionDigits: 2,
@@ -85,6 +107,7 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
   const [pis, setPis] = useState<PurchaseInvoiceForInterco[]>([]);
   const [openPis, setOpenPis] = useState<PurchaseInvoiceForInterco[]>([]);
   const [openSis, setOpenSis] = useState<OpenSalesInvoice[]>([]);
+  const [siItemsByBillNo, setSiItemsByBillNo] = useState<Map<string, SIItemRow[]>>(new Map());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [expandedOpen, setExpandedOpen] = useState<Set<string>>(new Set());
 
@@ -145,6 +168,34 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
       setPis(list);
       setOpenPis(openList);
       setOpenSis(openSiList);
+
+      // Items van de entiteit-SI's ophalen voor 80%-detectie.
+      // bill_no op een Coop-PI = de naam van de oorspronkelijke entiteit-SI.
+      const billNos = Array.from(new Set(list.map((p) => p.bill_no).filter(Boolean)));
+      if (billNos.length > 0) {
+        try {
+          const items = await yapp.fetchList<SIItemRow>("Sales Invoice Item", {
+            fields: ["parent", "item_name", "qty"],
+            filters: [
+              ["parenttype", "=", "Sales Invoice"],
+              ["parent", "in", billNos],
+            ],
+            limit_page_length: 5000,
+          });
+          const map = new Map<string, SIItemRow[]>();
+          for (const it of items) {
+            const arr = map.get(it.parent) ?? [];
+            arr.push(it);
+            map.set(it.parent, arr);
+          }
+          setSiItemsByBillNo(map);
+        } catch {
+          // Permissie/connectie-fout: badge toont "?" voor alle rijen, geen blocker
+          setSiItemsByBillNo(new Map());
+        }
+      } else {
+        setSiItemsByBillNo(new Map());
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Onbekende fout");
     } finally {
@@ -347,6 +398,12 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
               const isOpen = expanded.has(s.supplier);
               const rows = piBySupplier.get(s.supplier) ?? [];
               const empty = s.count === 0;
+              // Aggregaat 80%-status voor deze entiteit
+              let yes = 0, no = 0, unk = 0;
+              for (const r of rows) {
+                const f = detectEighty(siItemsByBillNo.get(r.bill_no));
+                if (f === "yes") yes++; else if (f === "no") no++; else unk++;
+              }
               return (
                 <Fragment key={s.supplier}>
                   <tr
@@ -356,7 +413,31 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
                     <td className="px-2 py-2 text-center">
                       {!empty && (isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
                     </td>
-                    <td className="px-4 py-2 font-medium">{s.supplier}</td>
+                    <td className="px-4 py-2 font-medium">
+                      {s.supplier}
+                      {!empty && (
+                        <span
+                          className="ml-2 inline-flex items-center gap-1 text-[10px]"
+                          title={`${yes} met 80%-aanduiding, ${no} zonder, ${unk} niet geladen`}
+                        >
+                          {yes > 0 && (
+                            <span className="inline-flex items-center gap-0.5 text-emerald-700">
+                              <Check size={10} />{yes}
+                            </span>
+                          )}
+                          {no > 0 && (
+                            <span className="inline-flex items-center gap-0.5 text-amber-600">
+                              <AlertTriangle size={10} />{no}
+                            </span>
+                          )}
+                          {unk > 0 && (
+                            <span className="inline-flex items-center gap-0.5 text-slate-400">
+                              <HelpCircle size={10} />{unk}
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-2 text-right">{s.count}</td>
                     <td className="px-4 py-2 text-right font-semibold text-slate-800">{fmtEur(s.sumNet)}</td>
                     <td className="px-4 py-2 text-right text-slate-500">{fmtEur(s.sumGross)}</td>
@@ -373,6 +454,12 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
                               <th className="text-left py-1">Datum</th>
                               <th className="text-left py-1">Factuurnr</th>
                               <th className="text-left py-1">PI</th>
+                              <th
+                                className="text-center py-1"
+                                title="✓ = '80%' of factor 0,8 staat in itemnaam/qty.  ⚠ = items gevonden maar geen 80%-aanduiding.  ? = items niet geladen."
+                              >
+                                80%
+                              </th>
                               <th className="text-right py-1">Excl BTW</th>
                               <th className="text-right py-1">Incl BTW</th>
                               <th className="text-right py-1">Openstaand</th>
@@ -380,7 +467,11 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
                             </tr>
                           </thead>
                           <tbody>
-                            {rows.map((r) => (
+                            {rows.map((r) => {
+                              const flag = detectEighty(siItemsByBillNo.get(r.bill_no));
+                              const items = siItemsByBillNo.get(r.bill_no) ?? [];
+                              const itemNames = items.map((it) => it.item_name).join(" | ");
+                              return (
                               <tr key={r.name} className="text-slate-700">
                                 <td className="py-1">{r.posting_date}</td>
                                 <td className="py-1 text-slate-500">{r.bill_no || "-"}</td>
@@ -395,6 +486,15 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
                                     {r.name} <ExternalLink size={10} />
                                   </a>
                                 </td>
+                                <td className="py-1 text-center" title={itemNames || "geen items geladen"}>
+                                  {flag === "yes" ? (
+                                    <Check size={12} className="inline text-emerald-600" />
+                                  ) : flag === "no" ? (
+                                    <AlertTriangle size={12} className="inline text-amber-500" />
+                                  ) : (
+                                    <HelpCircle size={12} className="inline text-slate-300" />
+                                  )}
+                                </td>
                                 <td className="py-1 text-right">{fmtEur(r.net_total)}</td>
                                 <td className="py-1 text-right text-slate-500">{fmtEur(r.grand_total)}</td>
                                 <td className="py-1 text-right text-amber-700">
@@ -402,7 +502,8 @@ export default function IntercompanyPanel({ company, year, erpAppUrl }: Props) {
                                 </td>
                                 <td className="py-1 text-right text-emerald-700">{fmtEur(r.net_total * 0.25)}</td>
                               </tr>
-                            ))}
+                              );
+                            })}
                           </tbody>
                         </table>
                       </td>
