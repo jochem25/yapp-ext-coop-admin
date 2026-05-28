@@ -182,13 +182,12 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
   }, [matrix, columns]);
 
   // Coöperatie-kosten per maand per entiteit op basis van die-maand-headcount.
-  // De jaarbedragen zijn input; maand-bedrag = jaarbedrag / 12. Coöp betaalt
-  // zelf nooit (0). De jaartotal-kolom is de SOM van 12 maand-bedragen — niet
-  // piek-based — want de factuur loopt mee met het werkelijke ledental.
+  // De input-bedragen zijn PER MAAND (niet per jaar). Coöp betaalt zelf nooit (0).
+  // Jaartotal-kolom = som van 12 maand-bedragen — loopt mee met werkelijk ledental.
   function monthlyCostForCount(n: number): number {
     if (n === 0) return 0;
-    if (n === 1) return costBase / 12;
-    return (n * costMarginal) / 12;
+    if (n === 1) return costBase;
+    return n * costMarginal;
   }
 
   const monthlyCostMatrix = useMemo(() => {
@@ -276,7 +275,7 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
       <div className="px-5 py-2 bg-white border-b border-slate-100 flex items-center gap-4 flex-wrap text-sm">
         <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Kosten/jaar per entiteit</span>
         <label className="inline-flex items-center gap-2 text-slate-600">
-          Solo (1 persoon)
+          Solo (1 persoon) /mnd
           <span className="text-slate-400">€</span>
           <input
             type="number"
@@ -288,7 +287,7 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
           />
         </label>
         <label className="inline-flex items-center gap-2 text-slate-600">
-          Per medewerker (2+)
+          Per medewerker (2+) /mnd
           <span className="text-slate-400">€</span>
           <input
             type="number"
@@ -300,7 +299,7 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
           />
         </label>
         <span className="text-xs text-slate-400">
-          Maandbedrag = jaartarief / 12. Solo-tarief bij 1 lid; vanaf 2 leden tarief × aantal-die-maand.
+          Tarieven per maand. Solo (1 lid) = solo-tarief; vanaf 2 leden = aantal × tarief.
           Jaartotaal = som van 12 maanden (loopt mee met werkelijk ledental). Coöperatie betaalt niks.
         </span>
       </div>
