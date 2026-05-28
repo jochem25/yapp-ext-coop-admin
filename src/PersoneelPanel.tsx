@@ -25,6 +25,12 @@ interface Employee {
   employment_type: string | null;
 }
 
+interface SIRevenue {
+  company: string;
+  net_total: number;
+  is_internal_customer: number;
+}
+
 const ZERO_HOURS_TYPE = "Nuluren contract";
 const COOP_COMPANY = "3BM Coöperatie U.A.";
 
@@ -92,6 +98,7 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [siRevenue, setSiRevenue] = useState<SIRevenue[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null); // key = `${month}-${company}`
   const [onlyActive, setOnlyActive] = useState(true);
   const [hideZeroHours, setHideZeroHours] = useState(true);
@@ -140,6 +147,43 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
   }
 
   useEffect(() => { load(); }, []);
+
+  // Externe omzet per company voor het geselecteerde jaar (her-fetched bij year-wijziging).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const sis = await yapp.fetchList<SIRevenue>("Sales Invoice", {
+          fields: ["company", "net_total", "is_internal_customer"],
+          filters: [
+            ["docstatus", "=", 1],
+            ["posting_date", ">=", `${year}-01-01`],
+            ["posting_date", "<=", `${year}-12-31`],
+          ],
+          limit_page_length: 5000,
+        });
+        if (!cancelled) setSiRevenue(sis);
+      } catch {
+        if (!cancelled) setSiRevenue([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [year]);
+
+  // Externe omzet (excl intercompany customers) per company.
+  const revenueByCompany = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const si of siRevenue) {
+      if (si.is_internal_customer) continue;
+      m.set(si.company, (m.get(si.company) ?? 0) + (si.net_total ?? 0));
+    }
+    return m;
+  }, [siRevenue]);
+
+  const revenueTotal = useMemo(
+    () => Array.from(revenueByCompany.values()).reduce((s, v) => s + v, 0),
+    [revenueByCompany],
+  );
 
   // Kolommen: alle companies met minstens één employee in dit jaar
   const columns = useMemo(() => {
@@ -447,6 +491,45 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
                   </td>
                 ))}
                 <td className="px-2 py-1.5 text-right tabular-nums text-teal-700">{fmtEur(costTotal)}</td>
+              </tr>
+              <tr className="bg-slate-50/60">
+                <td
+                  className="px-2 py-1.5 text-slate-500 text-[10px] uppercase tracking-wide"
+                  title="Externe Sales Invoices in dit jaar (is_internal_customer = 0)"
+                >
+                  Omzet (extern)
+                </td>
+                {columns.map((c) => (
+                  <td key={c} className="px-2 py-1.5 text-right tabular-nums text-slate-500">
+                    {fmtEur(revenueByCompany.get(c) ?? 0)}
+                  </td>
+                ))}
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{fmtEur(revenueTotal)}</td>
+              </tr>
+              <tr className="bg-slate-50/60">
+                <td
+                  className="px-2 py-1.5 text-slate-500 text-[10px] uppercase tracking-wide"
+                  title="Coöp-bijdrage als % van externe omzet"
+                >
+                  Coöp-kosten % omzet
+                </td>
+                {columns.map((c) => {
+                  const rev = revenueByCompany.get(c) ?? 0;
+                  const cost = costPerColumn[c] ?? 0;
+                  if (c === COOP_COMPANY || rev <= 0 || cost <= 0) {
+                    return <td key={c} className="px-2 py-1.5 text-right text-slate-300">—</td>;
+                  }
+                  const pct = (cost / rev) * 100;
+                  const tone = pct >= 10 ? "text-rose-600" : pct >= 5 ? "text-amber-600" : "text-emerald-600";
+                  return (
+                    <td key={c} className={`px-2 py-1.5 text-right tabular-nums ${tone}`}>
+                      {pct.toFixed(1)}%
+                    </td>
+                  );
+                })}
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">
+                  {revenueTotal > 0 && costTotal > 0 ? `${((costTotal / revenueTotal) * 100).toFixed(1)}%` : "—"}
+                </td>
               </tr>
             </tfoot>
           </table>
