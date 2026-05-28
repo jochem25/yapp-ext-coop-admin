@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { RefreshCw, ChevronDown, ChevronRight, ExternalLink, ArrowUp, ArrowDown } from "lucide-react";
+import { RefreshCw, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { yapp } from "./yapp-bridge";
+import { SortHeader, type SortState } from "./table-helpers";
 
 /**
  * Kosten-matrix: maand × (grootboek of leverancier).
@@ -30,7 +31,6 @@ interface GLEntry {
 }
 
 type GroupMode = "account" | "supplier";
-type SortKey = "label" | "total";
 
 const MONTHS_NL_SHORT = [
   "Jan", "Feb", "Mrt", "Apr", "Mei", "Jun",
@@ -66,7 +66,7 @@ interface Props {
 export default function CostMatrix({ company, year, erpAppUrl }: Props) {
   const [groupMode, setGroupMode] = useState<GroupMode>("account");
   const [hideEmpty, setHideEmpty] = useState<boolean>(true);
-  const [sortKey, setSortKey] = useState<SortKey>("total");
+  const [sort, setSort] = useState<SortState | null>({ field: "total", dir: "desc" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expenseAccounts, setExpenseAccounts] = useState<Account[]>([]);
@@ -239,16 +239,18 @@ export default function CostMatrix({ company, year, erpAppUrl }: Props) {
   }, [entries, groupMode, voucherSupplier, accountMeta]);
 
   const sortedRows = useMemo(() => {
+    if (!sort) return rows;
     const copy = rows.slice();
-    if (sortKey === "label") {
+    const mul = sort.dir === "asc" ? 1 : -1;
+    if (sort.field === "label") {
       copy.sort((a, b) =>
-        groupLabel(a.key).localeCompare(groupLabel(b.key), "nl", { numeric: true, sensitivity: "base" }),
+        mul * groupLabel(a.key).localeCompare(groupLabel(b.key), "nl", { numeric: true, sensitivity: "base" }),
       );
     } else {
-      copy.sort((a, b) => b.total - a.total);
+      copy.sort((a, b) => mul * (a.total - b.total));
     }
     return copy;
-  }, [rows, sortKey, canonicalAccountLabels, groupMode]);
+  }, [rows, sort, canonicalAccountLabels, groupMode]);
 
   const visibleRows = hideEmpty ? sortedRows.filter((r) => r.total > 0) : sortedRows;
 
@@ -326,31 +328,24 @@ export default function CostMatrix({ company, year, erpAppUrl }: Props) {
           <thead className="bg-slate-50 border-b border-slate-200 sticky top-0">
             <tr>
               <th className="w-6 px-1 py-2"></th>
-              <th
-                onClick={() => setSortKey("label")}
-                aria-sort={sortKey === "label" ? "ascending" : "none"}
-                className="text-left px-3 py-2 font-semibold text-slate-600 min-w-[200px] cursor-pointer select-none hover:bg-slate-100"
-                title="Sorteer alfanumeriek"
-              >
-                <span className="inline-flex items-center gap-1">
-                  {groupMode === "account" ? "Grootboek" : "Leverancier"}
-                  {sortKey === "label" && <ArrowUp size={12} className="text-teal-600" />}
-                </span>
-              </th>
+              <SortHeader
+                field="label"
+                label={groupMode === "account" ? "Grootboek" : "Leverancier"}
+                sort={sort}
+                onSort={setSort}
+                className="min-w-[200px]"
+              />
               {MONTHS_NL_SHORT.map((m, i) => (
                 <th key={i} className="text-right px-2 py-2 font-semibold text-slate-600 whitespace-nowrap">{m}</th>
               ))}
-              <th
-                onClick={() => setSortKey("total")}
-                aria-sort={sortKey === "total" ? "descending" : "none"}
-                className="text-right px-3 py-2 font-semibold text-slate-700 whitespace-nowrap cursor-pointer select-none hover:bg-slate-100"
-                title="Sorteer op bedrag (hoog → laag)"
-              >
-                <span className="inline-flex items-center gap-1 justify-end">
-                  {sortKey === "total" && <ArrowDown size={12} className="text-teal-600" />}
-                  Totaal
-                </span>
-              </th>
+              <SortHeader
+                field="total"
+                label="Totaal"
+                align="right"
+                sort={sort}
+                onSort={setSort}
+                className="whitespace-nowrap"
+              />
             </tr>
           </thead>
           <tbody>
