@@ -170,12 +170,22 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
     return () => { cancelled = true; };
   }, [year]);
 
-  // Externe omzet (excl intercompany customers) per company.
+  // Omzet per company op 100%-basis:
+  //  - Externe SI's (is_internal_customer=0): tellen 1-op-1
+  //  - Entiteit-SI's aan Coöp (is_internal_customer=1, company ≠ Coöp):
+  //    dit is het 80%-deel van de doorbelasting, dus omzet = net_total / 0.80
+  //  - Coöp's eigen intercompany-SI's (zeldzaam): genegeerd om dubbeltelling te voorkomen
   const revenueByCompany = useMemo(() => {
     const m = new Map<string, number>();
     for (const si of siRevenue) {
-      if (si.is_internal_customer) continue;
-      m.set(si.company, (m.get(si.company) ?? 0) + (si.net_total ?? 0));
+      const isInter = !!si.is_internal_customer;
+      const isCoop = si.company === COOP_COMPANY;
+      const net = si.net_total ?? 0;
+      if (isInter && !isCoop) {
+        m.set(si.company, (m.get(si.company) ?? 0) + net / 0.80);
+      } else if (!isInter) {
+        m.set(si.company, (m.get(si.company) ?? 0) + net);
+      }
     }
     return m;
   }, [siRevenue]);
@@ -495,9 +505,9 @@ export default function PersoneelPanel({ year: rawYear, erpAppUrl }: Props) {
               <tr className="bg-slate-50/60">
                 <td
                   className="px-2 py-1.5 text-slate-500 text-[10px] uppercase tracking-wide"
-                  title="Externe Sales Invoices in dit jaar (is_internal_customer = 0)"
+                  title="Externe Sales Invoices (1:1) plus entiteit-SI's aan Coöp / 0,80 (= 100%-basis volgens 80/20-regel)"
                 >
-                  Omzet (extern)
+                  Omzet (100%)
                 </td>
                 {columns.map((c) => (
                   <td key={c} className="px-2 py-1.5 text-right tabular-nums text-slate-500">
