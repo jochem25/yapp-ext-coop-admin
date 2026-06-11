@@ -537,10 +537,11 @@ export default function App() {
       {drill && drillData && (() => {
         const isPiOpen = drill === "pi_open";
         const piItems = isPiOpen ? (drillData.items as PurchaseInvoice[]) : [];
-        const selectableItems = piItems.filter((x) => !paidInBatch.has(x.name));
-        const selectedItems = piItems.filter((x) => selectedPis.has(x.name) && !paidInBatch.has(x.name));
+        const selectableItems = piItems;
+        const selectedItems = piItems.filter((x) => selectedPis.has(x.name));
         const selectedTotal = selectedItems.reduce((s, x) => s + x.outstanding_amount, 0);
         const allSelected = selectableItems.length > 0 && selectableItems.every((x) => selectedPis.has(x.name));
+        const markedCount = piItems.filter((x) => paidInBatch.has(x.name)).length;
 
         return (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -574,6 +575,17 @@ export default function App() {
                   >
                     {allSelected ? "Wis selectie" : "Selecteer alles"}
                   </button>
+                  {markedCount > 0 && (
+                    <button
+                      onClick={() => {
+                        for (const x of piItems) clearPaidFlag(x.name);
+                      }}
+                      className="text-xs px-3 py-1.5 border border-slate-300 rounded hover:bg-white"
+                      title="Verwijder de 'in batch verstuurd'-markering van alle zichtbare facturen"
+                    >
+                      Wis batch-markeringen ({markedCount})
+                    </button>
+                  )}
                   <button
                     onClick={() => setShowBatch(true)}
                     disabled={selectedItems.length === 0 || !company}
@@ -601,7 +613,7 @@ export default function App() {
 
       {showBatch && (() => {
         const batchInvoices: BatchInvoice[] = pi
-          .filter((x) => selectedPis.has(x.name) && !paidInBatch.has(x.name))
+          .filter((x) => selectedPis.has(x.name))
           .map((x) => ({
             name: x.name,
             bill_no: x.bill_no,
@@ -865,16 +877,12 @@ function DrillTable({ kind, items, erpAppUrl, inclBTW, selectedPis, paidInBatch,
               <tr key={r.name} className={`border-b border-slate-100 hover:bg-slate-50 ${isPaid ? "bg-slate-50 text-slate-400" : ""}`}>
                 {showSelect && (
                   <td className="px-3 py-2 text-center">
-                    {isPaid ? (
-                      <span className="text-[10px] text-slate-400">batch</span>
-                    ) : (
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => onTogglePi?.(r.name)}
-                        className="cursor-pointer accent-teal-600"
-                      />
-                    )}
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => onTogglePi?.(r.name)}
+                      className="cursor-pointer accent-teal-600"
+                    />
                   </td>
                 )}
                 <td className="px-4 py-2 text-slate-500">{r.posting_date}</td>
