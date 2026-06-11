@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, X, AlertTriangle, CheckCircle2, Copy } from "lucide-react";
+import { Download, X, AlertTriangle, CheckCircle2, Copy, Save } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 import {
   generateSepaXml,
@@ -254,6 +254,33 @@ export default function PaymentBatch({ invoices, company, onClose, onPaid }: Pro
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  // File System Access API ("Opslaan als"-dialoog) valt buiten de
+  // allow-downloads sandbox-blokkade. Niet elke browser/iframe-context
+  // staat het toe — bij een SecurityError valt de UI terug op kopiëren.
+  const canSaveAs = typeof (window as { showSaveFilePicker?: unknown }).showSaveFilePicker === "function";
+
+  async function saveXmlAs() {
+    if (!generatedXml) return;
+    type SaveFn = (opts: {
+      suggestedName: string;
+      types: Array<{ description: string; accept: Record<string, string[]> }>;
+    }) => Promise<{ createWritable: () => Promise<{ write: (s: string) => Promise<void>; close: () => Promise<void> }> }>;
+    const picker = (window as unknown as { showSaveFilePicker: SaveFn }).showSaveFilePicker;
+    try {
+      const handle = await picker({
+        suggestedName: xmlFileName,
+        types: [{ description: "SEPA XML", accept: { "application/xml": [".xml"] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(generatedXml);
+      await writable.close();
+    } catch (e) {
+      // AbortError = user annuleerde de dialoog; dat is geen fout.
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      alert("Opslaan geblokkeerd door de browser-sandbox — gebruik 'Kopieer XML' en plak in een .xml-bestand.");
+    }
+  }
+
   // Sandboxed iframes zonder allow-downloads blokkeren de download stilletjes
   // (de click slaagt, er verschijnt geen bestand). Clipboard als vangnet.
   async function copyXml() {
@@ -438,6 +465,14 @@ export default function PaymentBatch({ invoices, company, onClose, onPaid }: Pro
               Geen bestand? Dan blokkeert de Y-app sandbox de download — gebruik de knoppen hiernaast.
             </span>
             <span className="flex items-center gap-2">
+              {canSaveAs && (
+                <button
+                  onClick={saveXmlAs}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 text-white rounded hover:bg-teal-700"
+                >
+                  <Save size={12} /> Opslaan als...
+                </button>
+              )}
               <button
                 onClick={() => triggerDownload(generatedXml, xmlFileName)}
                 className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-300 rounded hover:bg-white"
