@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, X, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Download, X, AlertTriangle, CheckCircle2, Copy } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 import {
   generateSepaXml,
@@ -87,6 +87,9 @@ export default function PaymentBatch({ invoices, company, onClose, onPaid }: Pro
   const [execDate, setExecDate] = useState<string>(todayIso());
   const [lines, setLines] = useState<BatchLine[]>([]);
   const [downloaded, setDownloaded] = useState(false);
+  const [generatedXml, setGeneratedXml] = useState<string | null>(null);
+  const [xmlFileName, setXmlFileName] = useState<string>("");
+  const [copied, setCopied] = useState(false);
 
   // Load company + supplier bank accounts
   useEffect(() => {
@@ -230,17 +233,45 @@ export default function PaymentBatch({ invoices, company, onClose, onPaid }: Pro
       transactions,
     });
 
+    const d = execDate.replace(/-/g, "");
+    const fileName = `BATCH-${slug(company)}-${d}-${new Date().getHours().toString().padStart(2,"0")}${new Date().getMinutes().toString().padStart(2,"0")}.xml`;
+    setGeneratedXml(xml);
+    setXmlFileName(fileName);
+    setCopied(false);
+    triggerDownload(xml, fileName);
+    setDownloaded(true);
+  }
+
+  function triggerDownload(xml: string, fileName: string) {
     const blob = new Blob([xml], { type: "application/xml" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    const d = execDate.replace(/-/g, "");
     a.href = url;
-    a.download = `BATCH-${slug(company)}-${d}-${new Date().getHours().toString().padStart(2,"0")}${new Date().getMinutes().toString().padStart(2,"0")}.xml`;
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setDownloaded(true);
+  }
+
+  // Sandboxed iframes zonder allow-downloads blokkeren de download stilletjes
+  // (de click slaagt, er verschijnt geen bestand). Clipboard als vangnet.
+  async function copyXml() {
+    if (!generatedXml) return;
+    try {
+      await navigator.clipboard.writeText(generatedXml);
+      setCopied(true);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = generatedXml;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(true);
+    }
   }
 
   function handleMarkPaid() {
@@ -400,10 +431,35 @@ export default function PaymentBatch({ invoices, company, onClose, onPaid }: Pro
           )}
         </div>
 
+        {downloaded && generatedXml && (
+          <div className="px-5 py-3 border-t border-slate-100 bg-teal-50/50 text-xs text-slate-600 flex items-center justify-between gap-3 flex-wrap">
+            <span>
+              Gedownload als <span className="font-mono font-semibold">{xmlFileName}</span> (map Downloads).
+              Geen bestand? Dan blokkeert de Y-app sandbox de download — gebruik de knoppen hiernaast.
+            </span>
+            <span className="flex items-center gap-2">
+              <button
+                onClick={() => triggerDownload(generatedXml, xmlFileName)}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-300 rounded hover:bg-white"
+              >
+                <Download size={12} /> Download opnieuw
+              </button>
+              <button
+                onClick={copyXml}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded border ${
+                  copied ? "border-emerald-300 bg-emerald-100 text-emerald-700" : "border-slate-300 hover:bg-white"
+                }`}
+              >
+                <Copy size={12} /> {copied ? "Gekopieerd ✓" : "Kopieer XML"}
+              </button>
+            </span>
+          </div>
+        )}
+
         <div className="px-5 py-3 border-t border-slate-200 flex items-center justify-between gap-3">
           <div className="text-xs text-slate-500">
             {downloaded
-              ? "XML gedownload. Markeer als verstuurd om deze regels grijs te maken."
+              ? "Markeer als verstuurd om deze regels grijs te maken."
               : "Geen ERPNext-write — XML wordt alleen lokaal gedownload."}
           </div>
           <div className="flex items-center gap-2">
