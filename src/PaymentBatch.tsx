@@ -25,7 +25,7 @@ interface BankAccount {
   iban: string | null;
   bank_account_no: string | null;
   branch_code: string | null;
-  swift_number: string | null;
+  bank: string | null;
   is_default: number;
   is_company_account: number;
   party_type: string | null;
@@ -59,8 +59,10 @@ function pickIban(b: BankAccount): string {
   return (b.iban || b.bank_account_no || "").trim();
 }
 
-function pickBic(b: BankAccount): string {
-  return (b.swift_number || b.branch_code || "").trim();
+// BIC/SWIFT staat niet op Bank Account maar op het gekoppelde Bank-doctype —
+// "swift_number" als veld in de Bank Account query geeft een 417 van Frappe.
+function pickBic(b: BankAccount, bankBics: Map<string, string>): string {
+  return (bankBics.get(b.bank ?? "") || b.branch_code || "").trim();
 }
 
 function slug(s: string): string {
@@ -77,6 +79,7 @@ interface Props {
 export default function PaymentBatch({ invoices, company, onClose, onPaid }: Props) {
   const [companyAccounts, setCompanyAccounts] = useState<BankAccount[]>([]);
   const [supplierIbans, setSupplierIbans] = useState<Map<string, BankAccount>>(new Map());
+  const [bankBics, setBankBics] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -95,10 +98,10 @@ export default function PaymentBatch({ invoices, company, onClose, onPaid }: Pro
         const supplierIds = Array.from(new Set(invoices.map((i) => i.supplier)));
         const fields = [
           "name", "account_name", "iban", "bank_account_no",
-          "branch_code", "swift_number", "is_default", "is_company_account",
+          "branch_code", "bank", "is_default", "is_company_account",
           "party_type", "party", "company",
         ];
-        const [coAcc, supAcc] = await Promise.all([
+        const [coAcc, supAcc, banks] = await Promise.all([
           yapp.fetchList<BankAccount>("Bank Account", {
             fields,
             filters: [
@@ -119,8 +122,13 @@ export default function PaymentBatch({ invoices, company, onClose, onPaid }: Pro
                 limit_page_length: 500,
               })
             : Promise.resolve([] as BankAccount[]),
+          yapp.fetchList<{ name: string; swift_number: string | null }>("Bank", {
+            fields: ["name", "swift_number"],
+            limit_page_length: 200,
+          }),
         ]);
         if (cancelled) return;
+        setBankBics(new Map(banks.filter((b) => b.swift_number).map((b) => [b.name, b.swift_number as string])));
         setCompanyAccounts(coAcc);
         const map = new Map<string, BankAccount>();
         for (const b of supAcc) {
@@ -218,7 +226,7 @@ export default function PaymentBatch({ invoices, company, onClose, onPaid }: Pro
       paymentInfoId: buildPaymentInfoId(),
       debtorName: company,
       debtorIban: pickIban(dbtr),
-      debtorBic: pickBic(dbtr) || undefined,
+      debtorBic: pickBic(dbtr, bankBics) || undefined,
       transactions,
     });
 
@@ -280,7 +288,7 @@ export default function PaymentBatch({ invoices, company, onClose, onPaid }: Pro
                   {dbtr && (
                     <p className="text-xs text-slate-500 mt-1">
                       {pickIban(dbtr)}
-                      {pickBic(dbtr) ? ` · ${pickBic(dbtr)}` : " · BIC ontbreekt"}
+                      {pickBic(dbtr, bankBics) ? ` · ${pickBic(dbtr, bankBics)}` : " · BIC ontbreekt"}
                     </p>
                   )}
                 </div>
