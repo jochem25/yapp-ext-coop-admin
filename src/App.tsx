@@ -20,6 +20,7 @@ import {
   Table2,
   Briefcase,
   Users,
+  ClipboardCheck,
 } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 import LedgerChart from "./LedgerChart";
@@ -30,6 +31,7 @@ import ExternalCreditorsPanel from "./ExternalCreditorsPanel";
 import CostMatrix from "./CostMatrix";
 import ProjectsPanel from "./ProjectsPanel";
 import PersoneelPanel from "./PersoneelPanel";
+import BoekingenPanel from "./BoekingenPanel";
 import { SortHeader, FilterBar, sortRows, filterRows, sumField, type SortState } from "./table-helpers";
 
 const PAID_BATCH_KEY = "coop_admin_paid_in_batch";
@@ -197,7 +199,7 @@ export default function App() {
   const [piWithFile, setPiWithFile] = useState<Set<string>>(new Set());
 
   const [drill, setDrill] = useState<DrillKey | null>(null);
-  const [tab, setTab] = useState<"overview" | "ledger" | "expenses" | "tebetalen" | "crediteuren" | "kostenmatrix" | "projecten" | "personeel">("overview");
+  const [tab, setTab] = useState<"overview" | "boekingen" | "ledger" | "expenses" | "tebetalen" | "crediteuren" | "kostenmatrix" | "projecten" | "personeel">("overview");
 
   const [paidInBatch, setPaidInBatch] = useState<Set<string>>(() => loadPaidSet());
   const [selectedPis, setSelectedPis] = useState<Set<string>>(new Set());
@@ -439,6 +441,14 @@ export default function App() {
           <LayoutDashboard size={14} /> Overzicht
         </button>
         <button
+          onClick={() => setTab("boekingen")}
+          className={`flex items-center gap-2 px-4 py-1.5 text-sm rounded-md transition ${
+            tab === "boekingen" ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"
+          }`}
+        >
+          <ClipboardCheck size={14} /> Boekingen
+        </button>
+        <button
           onClick={() => setTab("ledger")}
           className={`flex items-center gap-2 px-4 py-1.5 text-sm rounded-md transition ${
             tab === "ledger" ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"
@@ -496,7 +506,9 @@ export default function App() {
         </button>
       </div>
 
-      {tab === "ledger" ? (
+      {tab === "boekingen" ? (
+        <BoekingenPanel company={company} year={year} erpAppUrl={erpAppUrl} inclBTW={inclBTW} />
+      ) : tab === "ledger" ? (
         <LedgerChart company={company} year={year} />
       ) : tab === "expenses" ? (
         <ExpensesTable company={company} year={year} erpAppUrl={erpAppUrl} />

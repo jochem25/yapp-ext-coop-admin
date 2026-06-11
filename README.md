@@ -6,6 +6,9 @@ Dashboard voor 3BM Coöperatie U.A. administratie:
 - Inkoopfacturen zonder PDF-bijlage
 - Niet-gekoppelde Payment Entries
 - Niet-gekoppelde (unreconciled) banktransacties
+- Boekingen-tab: draft inkoopfacturen en draft betalingen direct submitten
+  (per rij of in bulk, via `frappe.client.submit`) + gecombineerd
+  te-reconciliëren overzicht met link naar de Bank Reconciliation Tool
 
 Bedrijf en jaar zijn instelbaar; default = 3BM Coöperatie U.A. + huidig jaar.
 
