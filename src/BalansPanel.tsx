@@ -134,7 +134,12 @@ export default function BalansPanel({ company, erpAppUrl, inclBTW }: Props) {
   const payableIntern = useMemo(() => piView.filter((x) => isIntern(x.party)).reduce((s, x) => s + x.shown, 0), [piView]);
   const payableExtern = payable - payableIntern;
 
-  const netAll = bank + receivable - payable;
+  // 80/20: entiteiten factureren de coöp op 80% van het echte bedrag; de
+  // resterende 20% moet nog gefactureerd/betaald worden = 25% bovenop het
+  // geboekte intercompany-bedrag (0,20 / 0,80). Extern is normaal (100%).
+  const intercompanyTop = payableIntern * 0.25;
+  const payableFull = payable + intercompanyTop;
+  const netAll = bank + receivable - payableFull;
   const netExtern = bank + receivable - payableExtern;
 
   // Terugkerende kosten die er nog aankomen (abonnementen/hosting/…).
@@ -169,9 +174,10 @@ export default function BalansPanel({ company, erpAppUrl, inclBTW }: Props) {
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
           <div className="flex items-center gap-2 text-red-600 mb-1"><ArrowUpCircle size={18} /><span className="text-xs uppercase tracking-wide text-slate-500">Te betalen</span></div>
-          <p className="text-2xl font-bold text-slate-800">{fmtEur(payable)}</p>
+          <p className="text-2xl font-bold text-slate-800">{fmtEur(payableFull)}</p>
           <p className="text-xs text-slate-400">
             {fmtEur(payableIntern)} intern · {fmtEur(payableExtern)} extern
+            {intercompanyTop > 0 && <> · <span className="text-orange-500">+{fmtEur(intercompanyTop)} 20%-natranche</span></>}
           </p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
@@ -198,7 +204,9 @@ export default function BalansPanel({ company, erpAppUrl, inclBTW }: Props) {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4 text-sm text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-1">
         <span>{fmtEur(bank)} bank</span><span className="text-slate-300">+</span>
         <span className="text-emerald-600">{fmtEur(receivable)} te ontvangen</span><span className="text-slate-300">−</span>
-        <span className="text-red-600">{fmtEur(payable)} te betalen</span><span className="text-slate-300">=</span>
+        <span className="text-red-600">{fmtEur(payableFull)} te betalen</span>
+        {intercompanyTop > 0 && <span className="text-orange-500 text-xs">(incl. {fmtEur(intercompanyTop)} 20%-natranche)</span>}
+        <span className="text-slate-300">=</span>
         <span className={`font-bold ${netAll >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmtEur(netAll)}</span>
       </div>
 
