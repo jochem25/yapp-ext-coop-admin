@@ -21,6 +21,7 @@ import {
   Briefcase,
   Users,
   ClipboardCheck,
+  RefreshCcw,
 } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 import LedgerChart from "./LedgerChart";
@@ -32,6 +33,7 @@ import CostMatrix from "./CostMatrix";
 import ProjectsPanel from "./ProjectsPanel";
 import PersoneelPanel from "./PersoneelPanel";
 import BoekingenPanel from "./BoekingenPanel";
+import SubscriptionsPanel from "./SubscriptionsPanel";
 import { SortHeader, FilterBar, sortRows, filterRows, sumField, type SortState } from "./table-helpers";
 
 const PAID_BATCH_KEY = "coop_admin_paid_in_batch";
@@ -199,7 +201,7 @@ export default function App() {
   const [piWithFile, setPiWithFile] = useState<Set<string>>(new Set());
 
   const [drill, setDrill] = useState<DrillKey | null>(null);
-  const [tab, setTab] = useState<"overview" | "boekingen" | "ledger" | "expenses" | "tebetalen" | "crediteuren" | "kostenmatrix" | "projecten" | "personeel">("overview");
+  const [tab, setTab] = useState<"overview" | "boekingen" | "ledger" | "expenses" | "tebetalen" | "crediteuren" | "kostenmatrix" | "projecten" | "personeel" | "abonnementen">("overview");
 
   const [paidInBatch, setPaidInBatch] = useState<Set<string>>(() => loadPaidSet());
   const [selectedPis, setSelectedPis] = useState<Set<string>>(new Set());
@@ -504,6 +506,14 @@ export default function App() {
         >
           <Users size={14} /> Personeel
         </button>
+        <button
+          onClick={() => setTab("abonnementen")}
+          className={`flex items-center gap-2 px-4 py-1.5 text-sm rounded-md transition ${
+            tab === "abonnementen" ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"
+          }`}
+        >
+          <RefreshCcw size={14} /> Abonnementen
+        </button>
       </div>
 
       {tab === "boekingen" ? (
@@ -522,6 +532,8 @@ export default function App() {
         <ProjectsPanel company={company} erpAppUrl={erpAppUrl} inclBTW={inclBTW} />
       ) : tab === "personeel" ? (
         <PersoneelPanel year={year} erpAppUrl={erpAppUrl} />
+      ) : tab === "abonnementen" ? (
+        <SubscriptionsPanel company={company} erpAppUrl={erpAppUrl} inclBTW={inclBTW} />
       ) : (
       <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
