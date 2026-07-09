@@ -15,6 +15,7 @@ import { estimateMonthlyRecurring, type PurchaseInvoiceLite } from "./recurring"
 interface Props {
   company: string;
   erpAppUrl: string;
+  inclBTW: boolean;
 }
 
 interface Invoice {
@@ -23,9 +24,12 @@ interface Invoice {
   posting_date: string;
   due_date: string;
   outstanding_amount: number;
+  net_total: number;
+  grand_total: number;
   status: string;
   docstatus: number;
 }
+type InvoiceView = Invoice & { shown: number };
 
 const INTERCOMPANY = new Set(
   [
@@ -63,7 +67,7 @@ function saveBank(company: string, value: string): void {
   localStorage.setItem(BANK_KEY, JSON.stringify(map));
 }
 
-export default function BalansPanel({ company, erpAppUrl }: Props) {
+export default function BalansPanel({ company, erpAppUrl, inclBTW }: Props) {
   const [si, setSi] = useState<Invoice[]>([]);
   const [pi, setPi] = useState<Invoice[]>([]);
   const [recurPi, setRecurPi] = useState<PurchaseInvoiceLite[]>([]);
@@ -89,13 +93,13 @@ export default function BalansPanel({ company, erpAppUrl }: Props) {
     try {
       const [siList, piList, recurList] = await Promise.all([
         yapp.fetchList<Record<string, unknown>>("Sales Invoice", {
-          fields: ["name", "customer_name", "posting_date", "due_date", "outstanding_amount", "status", "docstatus"],
+          fields: ["name", "customer_name", "posting_date", "due_date", "outstanding_amount", "net_total", "grand_total", "status", "docstatus"],
           filters,
           limit_page_length: 1000,
           order_by: "due_date asc",
         }),
         yapp.fetchList<Record<string, unknown>>("Purchase Invoice", {
-          fields: ["name", "supplier_name", "posting_date", "due_date", "outstanding_amount", "status", "docstatus"],
+          fields: ["name", "supplier_name", "posting_date", "due_date", "outstanding_amount", "net_total", "grand_total", "status", "docstatus"],
           filters,
           limit_page_length: 1000,
           order_by: "due_date asc",
@@ -120,16 +124,21 @@ export default function BalansPanel({ company, erpAppUrl }: Props) {
   useEffect(() => { load(); }, [company]);
 
   const bank = parseFloat(bankText.replace(",", ".")) || 0;
-  const receivable = useMemo(() => si.reduce((s, x) => s + x.outstanding_amount, 0), [si]);
-  const payable = useMemo(() => pi.reduce((s, x) => s + x.outstanding_amount, 0), [pi]);
-  const payableIntern = useMemo(() => pi.filter((x) => isIntern(x.party)).reduce((s, x) => s + x.outstanding_amount, 0), [pi]);
+  // Openstaand ex btw = openstaand × (net / bruto). Openstaand zelf is incl btw.
+  const shownAmt = (x: Invoice) =>
+    inclBTW || !x.grand_total ? x.outstanding_amount : x.outstanding_amount * (x.net_total / x.grand_total);
+  const siView = useMemo<InvoiceView[]>(() => si.map((x) => ({ ...x, shown: shownAmt(x) })), [si, inclBTW]);
+  const piView = useMemo<InvoiceView[]>(() => pi.map((x) => ({ ...x, shown: shownAmt(x) })), [pi, inclBTW]);
+  const receivable = useMemo(() => siView.reduce((s, x) => s + x.shown, 0), [siView]);
+  const payable = useMemo(() => piView.reduce((s, x) => s + x.shown, 0), [piView]);
+  const payableIntern = useMemo(() => piView.filter((x) => isIntern(x.party)).reduce((s, x) => s + x.shown, 0), [piView]);
   const payableExtern = payable - payableIntern;
 
   const netAll = bank + receivable - payable;
   const netExtern = bank + receivable - payableExtern;
 
   // Terugkerende kosten die er nog aankomen (abonnementen/hosting/…).
-  const recurring = useMemo(() => estimateMonthlyRecurring(recurPi, true), [recurPi]);
+  const recurring = useMemo(() => estimateMonthlyRecurring(recurPi, inclBTW), [recurPi, inclBTW]);
   const now = new Date();
   const monthsLeft = 12 - now.getMonth(); // incl. lopende maand (jul → 6)
   const recurToYearEnd = recurring.monthly * monthsLeft;
@@ -138,7 +147,12 @@ export default function BalansPanel({ company, erpAppUrl }: Props) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-slate-500">Liquiditeitspositie: bank + te ontvangen − te betalen.</p>
+        <p className="text-sm text-slate-500">
+          Liquiditeitspositie: bank + te ontvangen − te betalen.
+          <span className="ml-2 text-xs rounded-full bg-slate-100 text-slate-500 px-2 py-0.5">
+            bedragen {inclBTW ? "incl." : "excl."} btw
+          </span>
+        </p>
         <button onClick={load} disabled={loading} className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 cursor-pointer">
           <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> Vernieuwen
         </button>
@@ -227,15 +241,15 @@ export default function BalansPanel({ company, erpAppUrl }: Props) {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <InvoiceTable title="Te ontvangen facturen" tone="emerald" rows={si} doctype="Sales Invoice" erpAppUrl={erpAppUrl} loading={loading} />
-        <InvoiceTable title="Te betalen facturen" tone="red" rows={pi} doctype="Purchase Invoice" erpAppUrl={erpAppUrl} loading={loading} showIntern />
+        <InvoiceTable title="Te ontvangen facturen" tone="emerald" rows={siView} doctype="Sales Invoice" erpAppUrl={erpAppUrl} loading={loading} />
+        <InvoiceTable title="Te betalen facturen" tone="red" rows={piView} doctype="Purchase Invoice" erpAppUrl={erpAppUrl} loading={loading} showIntern />
       </div>
     </div>
   );
 }
 
 function InvoiceTable({ title, tone, rows, doctype, erpAppUrl, loading, showIntern }: {
-  title: string; tone: "emerald" | "red"; rows: Invoice[]; doctype: string; erpAppUrl: string; loading: boolean; showIntern?: boolean;
+  title: string; tone: "emerald" | "red"; rows: InvoiceView[]; doctype: string; erpAppUrl: string; loading: boolean; showIntern?: boolean;
 }) {
   const [sort, setSort] = useState<SortState | null>({ field: "due_date", dir: "asc" });
   const [search, setSearch] = useState("");
@@ -248,7 +262,7 @@ function InvoiceTable({ title, tone, rows, doctype, erpAppUrl, loading, showInte
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
       <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">{title}</h3>
-        <span className={`text-sm font-bold ${amountColor}`}>{fmtEur(sumField(visible, "outstanding_amount"))}</span>
+        <span className={`text-sm font-bold ${amountColor}`}>{fmtEur(sumField(visible, "shown"))}</span>
       </div>
       <FilterBar search={search} setSearch={setSearch} hasSort={sort !== null} resetSort={() => setSort(null)} totalCount={rows.length} visibleCount={visible.length} placeholder="Filter (naam, factuurnr, datum...)" />
       <div className="overflow-auto max-h-[60vh]">
@@ -258,7 +272,7 @@ function InvoiceTable({ title, tone, rows, doctype, erpAppUrl, loading, showInte
               <SortHeader field="party" label={tone === "emerald" ? "Klant" : "Leverancier"} sort={sort} onSort={setSort} />
               <SortHeader field="name" label="Factuur" sort={sort} onSort={setSort} />
               <SortHeader field="due_date" label="Vervalt" sort={sort} onSort={setSort} />
-              <SortHeader field="outstanding_amount" label="Openstaand" align="right" sort={sort} onSort={setSort} />
+              <SortHeader field="shown" label="Openstaand" align="right" sort={sort} onSort={setSort} />
             </tr>
           </thead>
           <tbody>
@@ -281,7 +295,7 @@ function InvoiceTable({ title, tone, rows, doctype, erpAppUrl, loading, showInte
                     {draft && <span className="ml-2 text-[10px] uppercase tracking-wide rounded bg-amber-100 text-amber-700 px-1">concept</span>}
                   </td>
                   <td className={`px-4 py-2 text-xs ${overdue ? "text-red-600 font-medium" : "text-slate-500"}`}>{r.due_date || "—"}</td>
-                  <td className={`px-4 py-2 text-right font-semibold ${amountColor}`}>{fmtEur(r.outstanding_amount)}</td>
+                  <td className={`px-4 py-2 text-right font-semibold ${amountColor}`}>{fmtEur(r.shown)}</td>
                 </tr>
               );
             })}

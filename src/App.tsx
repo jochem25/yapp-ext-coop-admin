@@ -545,7 +545,7 @@ export default function App() {
       ) : tab === "abonnementen" ? (
         <SubscriptionsPanel company={company} erpAppUrl={erpAppUrl} inclBTW={inclBTW} />
       ) : tab === "balans" ? (
-        <BalansPanel company={company} erpAppUrl={erpAppUrl} />
+        <BalansPanel company={company} erpAppUrl={erpAppUrl} inclBTW={inclBTW} />
       ) : (
       <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
