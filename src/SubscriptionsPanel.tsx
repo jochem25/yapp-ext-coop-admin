@@ -126,18 +126,20 @@ export default function SubscriptionsPanel({ company, erpAppUrl, inclBTW }: Prop
       const autoFreq = detectFreq(medianGapDays(dates));
       const info = store[name] ?? EMPTY;
       const freq: Freq = info.freq || autoFreq;
-      const amount = median(amounts);
+      const detected = median(amounts);
+      const amount = info.amount ?? detected; // handmatige bedrag-override wint
       const months = FREQ_MONTHS[freq];
       // Vaste maandlast alleen als de bedragen rond de mediaan clusteren
-      // (>=60% binnen ±30%). Zo niet → projectfacturatie (bv. G2O): "wisselend",
-      // geen extrapolatie, telt niet mee in het maandtotaal.
-      const stable = amount > 0 && amounts.filter((a) => a >= amount * 0.7 && a <= amount * 1.3).length / amounts.length >= 0.6;
+      // (>=60% binnen ±30%). Zo niet → projectfacturatie (bv. G2O): "wisselend".
+      // Een handmatige override forceert wel een vaste maandlast.
+      const stableDetected = detected > 0 && amounts.filter((a) => a >= detected * 0.7 && a <= detected * 1.3).length / amounts.length >= 0.6;
+      const stable = info.amount != null || stableDetected;
       const lastDate = [...dates].sort().at(-1) ?? "";
       const daysSince = lastDate ? (now - new Date(lastDate).getTime()) / 86_400_000 : Infinity;
       const threshold = freq === "monthly" ? 70 : freq === "quarterly" ? 160 : freq === "yearly" ? 450 : 120;
       out.push({
         key: name, supplier: invs[0].supplier, name, category: categorize(name), count: invs.length,
-        autoFreq, freq, amount, monthly: months && stable ? amount / months : null, variable: !stable,
+        autoFreq, freq, amount, monthly: months && stable ? amount / months : null, variable: !stableDetected,
         lastDate, active: daysSince <= threshold, cancelled: info.cancelled, cancelDate: info.cancelDate,
         endDate: info.endDate, manual: false,
       });
@@ -277,8 +279,17 @@ export default function SubscriptionsPanel({ company, erpAppUrl, inclBTW }: Prop
                       <input type="number" step="0.01" value={r.amount || ""} onChange={(e) => patchManual(r.key, { amount: parseFloat(e.target.value) || 0 })}
                         className="bg-white border border-slate-200 rounded px-1.5 py-1 text-xs w-24 text-right focus:outline-none focus:ring-1 focus:ring-teal-500" />
                     ) : (
-                      <span className="text-slate-700" title={r.variable ? "Bedrag wisselt sterk per factuur" : ""}>
-                        {fmtEur(r.amount)}{r.variable && <span className="ml-1 text-[10px] uppercase text-amber-500">wisselend</span>}
+                      <span className="inline-flex items-center justify-end gap-1">
+                        <span className="text-slate-400 text-xs">€</span>
+                        <input
+                          type="number" step="0.01"
+                          value={store[r.name]?.amount ?? ""}
+                          placeholder={r.amount.toFixed(2)}
+                          onChange={(e) => patch(r.name, { amount: e.target.value === "" ? undefined : parseFloat(e.target.value) })}
+                          title={store[r.name]?.amount != null ? "Handmatig ingesteld bedrag" : "Auto uit facturen — vul in om te overschrijven"}
+                          className="w-20 bg-white border border-slate-200 rounded px-1.5 py-1 text-xs text-right focus:outline-none focus:ring-1 focus:ring-teal-500"
+                        />
+                        {r.variable && store[r.name]?.amount == null && <span className="text-[10px] uppercase text-amber-500">wisselend</span>}
                       </span>
                     )}
                   </td>

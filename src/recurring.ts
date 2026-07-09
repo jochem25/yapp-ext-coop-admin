@@ -129,7 +129,10 @@ export const isSubscription = (v: { name: string; monthly: number | null; catego
 
 // --- opzeg-administratie + handmatige abonnementen (localStorage) -------------
 
-export interface CancelInfo { cancelled: boolean; cancelDate: string; endDate: string; freq: Freq | ""; }
+export interface CancelInfo {
+  cancelled: boolean; cancelDate: string; endDate: string; freq: Freq | "";
+  amount?: number; // handmatige override van het typische bedrag per factuur
+}
 export interface ManualSub {
   id: string; name: string; category: string; amount: number; freq: Freq;
   cancelled: boolean; cancelDate: string; endDate: string;
@@ -162,10 +165,12 @@ export function estimateMonthlyRecurring(invoices: PurchaseInvoiceLite[], inclBT
     if (info?.cancelled) continue;
     const freq: Freq = info?.freq || v.autoFreq;
     const months = FREQ_MONTHS[freq];
-    // Alleen tellen als er een vaste maandlast te bepalen is (stabiel bedrag).
-    if (!months || v.variable) continue;
-    const monthly = v.amount / months;
-    items.push({ name: v.name, category: v.category, monthly });
+    if (!months) continue;
+    const amount = info?.amount ?? v.amount;
+    // Een handmatige bedrag-override forceert een vaste maandlast; anders alleen
+    // tellen als het bedrag stabiel genoeg is (geen projectfacturatie).
+    if (info?.amount == null && v.variable) continue;
+    items.push({ name: v.name, category: v.category, monthly: amount / months });
   }
   for (const m of manual) {
     if (m.cancelled) continue;
