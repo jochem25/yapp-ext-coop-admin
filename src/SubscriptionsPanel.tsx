@@ -136,6 +136,7 @@ interface SubRow {
   freq: Freq;
   amount: number;
   monthly: number | null;
+  variable: boolean;       // bedragen wisselen te veel voor een vaste maandlast
   lastDate: string;
   active: boolean;
   cancelled: boolean;
@@ -222,13 +223,17 @@ export default function SubscriptionsPanel({ company, erpAppUrl, inclBTW }: Prop
       const freq: Freq = info.freq || autoFreq;
       const amount = median(amounts);
       const months = FREQ_MONTHS[freq];
+      // Vaste maandlast alleen als de bedragen rond de mediaan clusteren
+      // (>=60% binnen ±30%). Zo niet → projectfacturatie (bv. G2O): "wisselend",
+      // geen extrapolatie, telt niet mee in het maandtotaal.
+      const stable = amount > 0 && amounts.filter((a) => a >= amount * 0.7 && a <= amount * 1.3).length / amounts.length >= 0.6;
       const lastDate = [...dates].sort().at(-1) ?? "";
       const daysSince = lastDate ? (now - new Date(lastDate).getTime()) / 86_400_000 : Infinity;
       const threshold = freq === "monthly" ? 70 : freq === "quarterly" ? 160 : freq === "yearly" ? 450 : 120;
       out.push({
         key: name, supplier: invs[0].supplier, name, category: categorize(name), count: invs.length,
-        autoFreq, freq, amount, monthly: months ? amount / months : null, lastDate,
-        active: daysSince <= threshold, cancelled: info.cancelled, cancelDate: info.cancelDate,
+        autoFreq, freq, amount, monthly: months && stable ? amount / months : null, variable: !stable,
+        lastDate, active: daysSince <= threshold, cancelled: info.cancelled, cancelDate: info.cancelDate,
         endDate: info.endDate, manual: false,
       });
     }
@@ -240,15 +245,18 @@ export default function SubscriptionsPanel({ company, erpAppUrl, inclBTW }: Prop
       const months = FREQ_MONTHS[m.freq];
       return {
         key: m.id, supplier: "", name: m.name, category: m.category, count: null, autoFreq: m.freq,
-        freq: m.freq, amount: m.amount, monthly: months ? m.amount / months : null, lastDate: "",
-        active: true, cancelled: m.cancelled, cancelDate: m.cancelDate, endDate: m.endDate, manual: true,
+        freq: m.freq, amount: m.amount, monthly: months ? m.amount / months : null, variable: false,
+        lastDate: "", active: true, cancelled: m.cancelled, cancelDate: m.cancelDate, endDate: m.endDate, manual: true,
       };
     }), [manual]);
 
   const allRows = useMemo(() => [...manualRows, ...erpRows], [manualRows, erpRows]);
 
+  // Toon onder "alleen abonnementen": handmatige regels, echte vaste abo's
+  // (maandlast bepaald) en alles met een herkende categorie (ook wisselend,
+  // bv. Hosting G2O/Prilk) — maar niet de onbekende, onregelmatige ruis.
   const isSub = (r: SubRow) =>
-    r.manual || (!NON_SUBSCRIPTION.has(r.name.toLowerCase()) && (r.freq !== "irregular" || r.category !== "Overig"));
+    r.manual || (!NON_SUBSCRIPTION.has(r.name.toLowerCase()) && (r.monthly != null || r.category !== "Overig"));
 
   const filtered = useMemo(() => {
     let r = allRows;
@@ -364,10 +372,14 @@ export default function SubscriptionsPanel({ company, erpAppUrl, inclBTW }: Prop
                       <input type="number" step="0.01" value={r.amount || ""} onChange={(e) => patchManual(r.key, { amount: parseFloat(e.target.value) || 0 })}
                         className="bg-white border border-slate-200 rounded px-1.5 py-1 text-xs w-24 text-right focus:outline-none focus:ring-1 focus:ring-teal-500" />
                     ) : (
-                      <span className="text-slate-700">{fmtEur(r.amount)}</span>
+                      <span className="text-slate-700" title={r.variable ? "Bedrag wisselt sterk per factuur" : ""}>
+                        {fmtEur(r.amount)}{r.variable && <span className="ml-1 text-[10px] uppercase text-amber-500">wisselend</span>}
+                      </span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-right font-semibold text-slate-800 whitespace-nowrap">{r.monthly == null ? "—" : fmtEur(r.monthly)}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-slate-800 whitespace-nowrap" title={r.monthly == null && r.variable ? "Geen vaste maandlast — projectfacturatie" : ""}>
+                    {r.monthly == null ? (r.variable ? "wisselend" : "—") : fmtEur(r.monthly)}
+                  </td>
                   <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{r.lastDate || "—"}</td>
                   <td className="px-3 py-2 text-center">
                     <input type="checkbox" checked={r.cancelled} onChange={(e) => setCancelled(e.target.checked)} className="cursor-pointer accent-teal-600 w-4 h-4" />
