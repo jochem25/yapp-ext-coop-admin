@@ -176,8 +176,9 @@ export default function BalansPanel({ company, erpAppUrl, inclBTW }: Props) {
           <div className="flex items-center gap-2 text-red-600 mb-1"><ArrowUpCircle size={18} /><span className="text-xs uppercase tracking-wide text-slate-500">Te betalen</span></div>
           <p className="text-2xl font-bold text-slate-800">{fmtEur(payableFull)}</p>
           <p className="text-xs text-slate-400">
-            {fmtEur(payableIntern)} intern · {fmtEur(payableExtern)} extern
-            {intercompanyTop > 0 && <> · <span className="text-orange-500">+{fmtEur(intercompanyTop)} 20%-natranche</span></>}
+            {intercompanyTop > 0
+              ? <><span className="text-orange-500">{fmtEur(payableIntern * 1.25)} intern (×1,25)</span> · {fmtEur(payableExtern)} extern</>
+              : <>{fmtEur(payableIntern)} intern · {fmtEur(payableExtern)} extern</>}
           </p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
@@ -205,7 +206,7 @@ export default function BalansPanel({ company, erpAppUrl, inclBTW }: Props) {
         <span>{fmtEur(bank)} bank</span><span className="text-slate-300">+</span>
         <span className="text-emerald-600">{fmtEur(receivable)} te ontvangen</span><span className="text-slate-300">−</span>
         <span className="text-red-600">{fmtEur(payableFull)} te betalen</span>
-        {intercompanyTop > 0 && <span className="text-orange-500 text-xs">(incl. {fmtEur(intercompanyTop)} 20%-natranche)</span>}
+        {intercompanyTop > 0 && <span className="text-orange-500 text-xs">(intercompany ×1,25 voor de 20%-natranche)</span>}
         <span className="text-slate-300">=</span>
         <span className={`font-bold ${netAll >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmtEur(netAll)}</span>
       </div>
