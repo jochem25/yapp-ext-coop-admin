@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { RefreshCw, ExternalLink, RotateCcw, Plus, Trash2 } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 import { SortHeader, sortRows, type SortState } from "./table-helpers";
+import {
+  type Freq, type CancelInfo, type ManualSub, type PurchaseInvoiceLite,
+  FREQ_LABEL, FREQ_MONTHS, CATEGORIES, NON_SUBSCRIPTION,
+  categorize, median, medianGapDays, detectFreq, loadJSON, STORE_KEY, MANUAL_KEY,
+} from "./recurring";
 
 /**
  * Abonnementen — terugkerende inkoopkosten (software/IT/telecom/energie/…) met
@@ -18,112 +23,12 @@ interface Props {
   inclBTW: boolean;
 }
 
-interface PurchaseInvoice {
-  name: string;
-  supplier: string;
-  supplier_name: string;
-  posting_date: string;
-  grand_total: number;
-  net_total: number;
-  docstatus: number;
-}
-
-type Freq = "monthly" | "quarterly" | "yearly" | "irregular";
-
-const FREQ_LABEL: Record<Freq, string> = {
-  monthly: "Maandelijks",
-  quarterly: "Per kwartaal",
-  yearly: "Jaarlijks",
-  irregular: "Onregelmatig",
-};
-const FREQ_MONTHS: Record<Freq, number | null> = { monthly: 1, quarterly: 3, yearly: 12, irregular: null };
-const CATEGORIES = ["Software", "IT", "Telecom", "Hosting", "Energie", "Verzekering", "Accountant", "Administratie", "Overig"];
-
-// Leveranciers die geen abonnement zijn: onderlinge doorbelasting + retail.
-const NON_SUBSCRIPTION = new Set(
-  [
-    "3bm bouwtechniek v.o.f.", "3bm bouwtechniek", "3bm bouwkunde", "3bm engineering",
-    "3bm architectuur", "3bm bongers constructies", "jumbo supermarkten b.v.", "ikea",
-    "bol.com", "123inkt.nl", "bakkerij noord", "café post", "cafe post",
-    "chi-chi the golf venue", "puur events b.v.", "gemeente dordrecht", "v.o.f. in de bogaard",
-  ].map((s) => s.toLowerCase()),
-);
-
-// Categorie op leveranciernaam (keyword-match, lowercase).
-const CATEGORY_RULES: [string, string][] = [
-  ["microsoft", "Software"], ["autodesk", "Software"], ["adobe", "Software"],
-  ["hsbcad", "Software"], ["bjornlunden", "Software"], ["lettermint", "Software"],
-  ["bitdefender", "Software"], ["dropbox", "Software"],
-  ["lc ict", "IT"], ["more than just ict", "IT"],
-  ["lesec", "Telecom"], ["verbonden", "Telecom"], ["kpn", "Telecom"],
-  ["vodafone", "Telecom"], ["odido", "Telecom"], ["t-mobile", "Telecom"],
-  ["transip", "Hosting"], ["hetzner", "Hosting"], ["cloudflare", "Hosting"],
-  ["g2o", "Hosting"], ["prilk", "Hosting"],
-  ["budget energie", "Energie"], ["eneco", "Energie"], ["vattenfall", "Energie"],
-  ["essent", "Energie"], ["greenchoice", "Energie"],
-  ["verzeker", "Verzekering"], ["saa ", "Verzekering"],
-  ["aaff", "Accountant"], ["pcheck", "Administratie"], ["confianza", "Administratie"],
-];
-
-function categorize(name: string): string {
-  const n = name.toLowerCase();
-  for (const [kw, cat] of CATEGORY_RULES) if (n.includes(kw)) return cat;
-  return "Overig";
-}
+// Constants/helpers/typen komen uit ./recurring (gedeeld met BalansPanel).
+type PurchaseInvoice = PurchaseInvoiceLite;
+const EMPTY: CancelInfo = { cancelled: false, cancelDate: "", endDate: "", freq: "" };
 
 function fmtEur(n: number): string {
   return `€ ${n.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function median(nums: number[]): number {
-  if (nums.length === 0) return 0;
-  const s = [...nums].sort((a, b) => a - b);
-  return s[Math.floor(s.length / 2)];
-}
-
-function medianGapDays(dates: string[]): number | null {
-  if (dates.length < 2) return null;
-  const t = [...dates].sort().map((d) => new Date(d).getTime());
-  const gaps: number[] = [];
-  for (let i = 1; i < t.length; i++) gaps.push((t[i] - t[i - 1]) / 86_400_000);
-  return median(gaps);
-}
-
-function detectFreq(gap: number | null): Freq {
-  if (gap == null) return "irregular";
-  if (gap >= 20 && gap <= 45) return "monthly";
-  if (gap >= 75 && gap <= 110) return "quarterly";
-  if (gap >= 300 && gap <= 420) return "yearly";
-  return "irregular";
-}
-
-// --- opzeg-administratie voor ERPNext-leveranciers (localStorage) -------------
-
-interface CancelInfo { cancelled: boolean; cancelDate: string; endDate: string; freq: Freq | ""; }
-const STORE_KEY = "coop_admin_subscriptions";
-const MANUAL_KEY = "coop_admin_subscriptions_manual";
-const EMPTY: CancelInfo = { cancelled: false, cancelDate: "", endDate: "", freq: "" };
-
-// --- handmatige abonnementen (niet in ERPNext) --------------------------------
-
-interface ManualSub {
-  id: string;
-  name: string;
-  category: string;
-  amount: number;
-  freq: Freq;
-  cancelled: boolean;
-  cancelDate: string;
-  endDate: string;
-}
-
-function loadJSON<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
 }
 
 interface SubRow {

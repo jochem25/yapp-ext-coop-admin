@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw, ExternalLink, ArrowDownCircle, ArrowUpCircle, Landmark, Scale } from "lucide-react";
+import { RefreshCw, ExternalLink, ArrowDownCircle, ArrowUpCircle, Landmark, Scale, RefreshCcw } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 import { SortHeader, FilterBar, sortRows, filterRows, sumField, type SortState } from "./table-helpers";
+import { estimateMonthlyRecurring, type PurchaseInvoiceLite } from "./recurring";
 
 /**
  * Balans — liquiditeitspositie van de coöp: te ontvangen (debiteuren) +
@@ -65,6 +66,7 @@ function saveBank(company: string, value: string): void {
 export default function BalansPanel({ company, erpAppUrl }: Props) {
   const [si, setSi] = useState<Invoice[]>([]);
   const [pi, setPi] = useState<Invoice[]>([]);
+  const [recurPi, setRecurPi] = useState<PurchaseInvoiceLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [bankText, setBankText] = useState<string>(() => loadBank(company));
@@ -78,8 +80,14 @@ export default function BalansPanel({ company, erpAppUrl }: Props) {
     // niet gesubmit zijn al meetellen; ze krijgen een "concept"-badge.
     const filters: unknown[][] = [["docstatus", "!=", 2], ["outstanding_amount", "!=", 0]];
     if (company) filters.unshift(["company", "=", company]);
+    // Aparte set voor de terugkerende-kosten-schatting: alle inkoopfacturen van
+    // de laatste 2 jaar (voor het ritme), niet alleen de openstaande.
+    const cutoff = new Date();
+    cutoff.setFullYear(cutoff.getFullYear() - 2);
+    const recurFilters: unknown[][] = [["docstatus", "=", 1], ["posting_date", ">=", cutoff.toISOString().slice(0, 10)]];
+    if (company) recurFilters.unshift(["company", "=", company]);
     try {
-      const [siList, piList] = await Promise.all([
+      const [siList, piList, recurList] = await Promise.all([
         yapp.fetchList<Record<string, unknown>>("Sales Invoice", {
           fields: ["name", "customer_name", "posting_date", "due_date", "outstanding_amount", "status", "docstatus"],
           filters,
@@ -92,9 +100,16 @@ export default function BalansPanel({ company, erpAppUrl }: Props) {
           limit_page_length: 1000,
           order_by: "due_date asc",
         }),
+        yapp.fetchList<PurchaseInvoiceLite>("Purchase Invoice", {
+          fields: ["name", "supplier", "supplier_name", "posting_date", "grand_total", "net_total", "docstatus"],
+          filters: recurFilters,
+          limit_page_length: 5000,
+          order_by: "posting_date asc",
+        }),
       ]);
       setSi(siList.map((r) => ({ ...(r as unknown as Invoice), party: String(r.customer_name ?? "") })));
       setPi(piList.map((r) => ({ ...(r as unknown as Invoice), party: String(r.supplier_name ?? "") })));
+      setRecurPi(recurList);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Onbekende fout");
     } finally {
@@ -112,6 +127,13 @@ export default function BalansPanel({ company, erpAppUrl }: Props) {
 
   const netAll = bank + receivable - payable;
   const netExtern = bank + receivable - payableExtern;
+
+  // Terugkerende kosten die er nog aankomen (abonnementen/hosting/…).
+  const recurring = useMemo(() => estimateMonthlyRecurring(recurPi, true), [recurPi]);
+  const now = new Date();
+  const monthsLeft = 12 - now.getMonth(); // incl. lopende maand (jul → 6)
+  const recurToYearEnd = recurring.monthly * monthsLeft;
+  const netAfterCosts = netAll - recurToYearEnd;
 
   return (
     <div>
@@ -159,11 +181,49 @@ export default function BalansPanel({ company, erpAppUrl }: Props) {
       </div>
 
       {/* Rekenregel */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6 text-sm text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-1">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4 text-sm text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-1">
         <span>{fmtEur(bank)} bank</span><span className="text-slate-300">+</span>
         <span className="text-emerald-600">{fmtEur(receivable)} te ontvangen</span><span className="text-slate-300">−</span>
         <span className="text-red-600">{fmtEur(payable)} te betalen</span><span className="text-slate-300">=</span>
         <span className={`font-bold ${netAll >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmtEur(netAll)}</span>
+      </div>
+
+      {/* Verwachte terugkerende kosten */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <RefreshCcw size={16} className="text-orange-500" />
+          <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Nog te verwachten kosten</h3>
+          <span className="text-xs text-slate-400">abonnementen · hosting · vaste lasten</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <p className="text-xs text-slate-500 uppercase tracking-wide">Verwachte maandlast</p>
+            <p className="text-2xl font-bold text-slate-800">{fmtEur(recurring.monthly)}<span className="text-sm font-normal text-slate-400"> / mnd</span></p>
+            <p className="text-xs text-slate-400">{recurring.items.length} terugkerende posten</p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-500 uppercase tracking-wide">Rest dit jaar</p>
+            <p className="text-2xl font-bold text-orange-600">{fmtEur(recurToYearEnd)}</p>
+            <p className="text-xs text-slate-400">{monthsLeft} maanden × {fmtEur(recurring.monthly)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-500 uppercase tracking-wide">Netto na deze kosten</p>
+            <p className={`text-2xl font-bold ${netAfterCosts >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmtEur(netAfterCosts)}</p>
+            <p className="text-xs text-slate-400">overschot − rest dit jaar</p>
+          </div>
+        </div>
+        {recurring.items.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+            {recurring.items.slice(0, 10).map((it) => (
+              <span key={it.name}>{it.name} <span className="text-slate-400">{fmtEur(it.monthly)}/mnd</span></span>
+            ))}
+            {recurring.items.length > 10 && <span className="text-slate-400">+{recurring.items.length - 10} meer</span>}
+          </div>
+        )}
+        <p className="mt-3 text-xs text-slate-400">
+          Geschat uit de terugkerende inkoopfacturen (incl. handmatige abonnementen uit de Abonnementen-tab,
+          exclusief opgezegde). Alleen posten met een vaste maandlast; wisselende kosten (projectfacturen) tellen niet mee.
+        </p>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
