@@ -22,6 +22,7 @@ import {
   Users,
   ClipboardCheck,
   RefreshCcw,
+  Scale,
 } from "lucide-react";
 import { yapp } from "./yapp-bridge";
 import LedgerChart from "./LedgerChart";
@@ -34,6 +35,7 @@ import ProjectsPanel from "./ProjectsPanel";
 import PersoneelPanel from "./PersoneelPanel";
 import BoekingenPanel from "./BoekingenPanel";
 import SubscriptionsPanel from "./SubscriptionsPanel";
+import BalansPanel from "./BalansPanel";
 import { SortHeader, FilterBar, sortRows, filterRows, sumField, type SortState } from "./table-helpers";
 
 const PAID_BATCH_KEY = "coop_admin_paid_in_batch";
@@ -201,7 +203,7 @@ export default function App() {
   const [piWithFile, setPiWithFile] = useState<Set<string>>(new Set());
 
   const [drill, setDrill] = useState<DrillKey | null>(null);
-  const [tab, setTab] = useState<"overview" | "boekingen" | "ledger" | "expenses" | "tebetalen" | "crediteuren" | "kostenmatrix" | "projecten" | "personeel" | "abonnementen">("overview");
+  const [tab, setTab] = useState<"overview" | "boekingen" | "ledger" | "expenses" | "tebetalen" | "crediteuren" | "kostenmatrix" | "projecten" | "personeel" | "abonnementen" | "balans">("overview");
 
   const [paidInBatch, setPaidInBatch] = useState<Set<string>>(() => loadPaidSet());
   const [selectedPis, setSelectedPis] = useState<Set<string>>(new Set());
@@ -514,6 +516,14 @@ export default function App() {
         >
           <RefreshCcw size={14} /> Abonnementen
         </button>
+        <button
+          onClick={() => setTab("balans")}
+          className={`flex items-center gap-2 px-4 py-1.5 text-sm rounded-md transition ${
+            tab === "balans" ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"
+          }`}
+        >
+          <Scale size={14} /> Balans
+        </button>
       </div>
 
       {tab === "boekingen" ? (
@@ -534,6 +544,8 @@ export default function App() {
         <PersoneelPanel year={year} erpAppUrl={erpAppUrl} />
       ) : tab === "abonnementen" ? (
         <SubscriptionsPanel company={company} erpAppUrl={erpAppUrl} inclBTW={inclBTW} />
+      ) : tab === "balans" ? (
+        <BalansPanel company={company} erpAppUrl={erpAppUrl} />
       ) : (
       <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
