@@ -1,4 +1,4 @@
-# Coöp Penningmeester — Y-app extensie
+﻿# Coöp Penningmeester — Y-app extensie
 
 Iframe-extensie voor [Y-app](https://github.com/OpenAEC-Foundation/Y-app): een
 penningmeester-dashboard voor 3BM Coöperatie U.A.
@@ -62,7 +62,7 @@ Sessie-conventies voor de 3BM Bouwkunde orchestrator:
   dan `broker_register()` met de Agent Broker-waarden hierboven en `broker_poll()`.
 - **Sessie EINDE** → append een samenvatting aan
   `~/.claude/orchestrator/sessions/yapp-ext-coop-admin_latest.md`, en draai daarna
-  `& "Z:\50_projecten\7_3BM_bouwkunde\_claude_sessions\sync-session.ps1"` zodat
+  `& "D:\KBA_projecten\_claude_sessions\sync-session.ps1"` zodat
   recap + CC-transcript naar de share gaan (cross-PC zichtbaar).
 - **Registry:** `~/.claude/orchestrator/project-registry.json` (entry `yapp-ext-coop-admin`).
 - **Cross-project context:** `~/.claude/orchestrator/context/yapp-ext-coop-admin.md`.
